@@ -367,6 +367,22 @@ class ArchAPI:
 
         try:
             plan, files = ResponseParser().parse(raw_response)
+        except Exception as exc:
+            fallback_plan = self.plan_api(request)
+            fallback_plan.generation_allowed = False
+            fallback_plan.reason = f"LLM response could not be parsed: {exc}"
+
+            return GenerationResult(
+                project_path=self.project_path,
+                plan=fallback_plan,
+                files=[],
+                validation_report=ValidationReport(
+                    success=False,
+                    errors=[fallback_plan.reason],
+                    warnings=[],
+                ),
+                warnings=[],
+            )
         except LLMParseError as exc:
             empty_plan = APIPlan(
                 request=request,
