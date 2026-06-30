@@ -1,0 +1,1 @@
+class UserService:\n    pass\n\nuser_service = UserService()\n
