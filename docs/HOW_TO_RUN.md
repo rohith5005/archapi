@@ -24,28 +24,15 @@ Current dedicated framework support:
 
 ArchAPI is useful when you want to generate new API layers that follow an existing backend structure.
 
-For Express TypeScript, ArchAPI can generate:
+For Express TypeScript, ArchAPI can generate route, controller, service, schema, and test files.
 
-- route files
-- controller files
-- service files
-- schema files
-- test files
-
-For FastAPI, ArchAPI can generate:
-
-- router files
-- service files
-- schema files
-- test files
+For FastAPI, ArchAPI can generate router, service, schema, and test files.
 
 ArchAPI supports dry-run generation, which means users can inspect generated files before writing anything to disk.
 
 ---
 
 ## 2. Requirements
-
-Before using ArchAPI, make sure Python is installed.
 
 Recommended Python version:
 
@@ -59,65 +46,21 @@ Check Python:
 python3 --version
 ```
 
-Some systems use `python` instead of `python3`:
-
-```bash
-python --version
-```
-
 If plain `pip` does not work, use:
 
 ```bash
 python -m pip
 ```
 
-instead of:
-
-```bash
-pip
-```
-
-This guide uses `python -m pip` because it is safer and works better inside virtual environments.
-
 ---
 
-## 3. Option 1: Install from PyPI
-
-This is the easiest way to use ArchAPI.
-
-Create a new virtual environment:
+## 3. Install from PyPI
 
 ```bash
 python3 -m venv archapi-env
-```
-
-Activate it on macOS or Linux:
-
-```bash
 source archapi-env/bin/activate
-```
-
-Activate it on Windows PowerShell:
-
-```powershell
-archapi-env\Scripts\Activate.ps1
-```
-
-Upgrade pip:
-
-```bash
 python -m pip install --upgrade pip
-```
-
-Install ArchAPI:
-
-```bash
 python -m pip install archapi
-```
-
-Verify installation:
-
-```bash
 python -c "from archapi import ArchAPI; print('ArchAPI import works')"
 ```
 
@@ -129,52 +72,15 @@ ArchAPI import works
 
 ---
 
-## 4. Option 2: Run from GitHub Source
-
-Use this option if you want to inspect the source code, modify ArchAPI, run the full test suite, or contribute to the project.
-
-Clone the repository:
+## 4. Run from GitHub Source
 
 ```bash
 git clone https://github.com/rohith5005/archapi.git
 cd archapi
-```
-
-Create a virtual environment:
-
-```bash
 python3 -m venv .venv
-```
-
-Activate it on macOS or Linux:
-
-```bash
 source .venv/bin/activate
-```
-
-Activate it on Windows PowerShell:
-
-```powershell
-.venv\Scripts\Activate.ps1
-```
-
-Upgrade build tools:
-
-```bash
 python -m pip install --upgrade pip setuptools wheel
-```
-
-Install ArchAPI in editable mode:
-
-```bash
 python -m pip install -e .
-```
-
-Editable mode means changes to source files inside the `archapi/` folder are immediately available without reinstalling the package.
-
-Verify import:
-
-```bash
 python -c "from archapi import ArchAPI; print('GitHub source install worked')"
 ```
 
@@ -188,14 +94,12 @@ GitHub source install worked
 
 ## 5. Run All Tests
 
-From the cloned repository root, run:
-
 ```bash
 python -m compileall archapi
 python -m unittest tests.test_archapi_suite -v
 ```
 
-Expected output should end with:
+Expected output:
 
 ```text
 Ran 7 tests
@@ -203,28 +107,9 @@ Ran 7 tests
 OK
 ```
 
-The test suite checks:
-
-- Express TypeScript detection
-- Express TypeScript generation
-- FastAPI detection
-- FastAPI generation
-- strict config mode
-- low-confidence blocking
-- context redaction
-- policy validation
-- architecture scoring
-
-You can also use the helper script:
+Or use:
 
 ```bash
-./scripts/run_tests.sh
-```
-
-If the script does not run because of permissions, run:
-
-```bash
-chmod +x scripts/run_tests.sh
 ./scripts/run_tests.sh
 ```
 
@@ -232,30 +117,16 @@ chmod +x scripts/run_tests.sh
 
 ## 6. Basic Usage
 
-Import ArchAPI:
-
 ```python
 from archapi import ArchAPI
-```
 
-Create an engine for a backend project:
-
-```python
 engine = ArchAPI("./my_backend_project")
-```
 
-Generate an API in dry-run mode:
-
-```python
 result = engine.generate_api(
     "Create GET API for user order history",
     dry_run=True,
 )
-```
 
-Print generated output:
-
-```python
 print(result.plan)
 print(result.validation_report)
 print(result.diff)
@@ -263,13 +134,9 @@ print(result.diff)
 
 ---
 
-## 7. What Dry Run Means
+## 7. Dry Run vs Writing Files
 
-Dry-run mode means ArchAPI generates files in memory only.
-
-It does not write files to disk.
-
-Example:
+Dry run generates files in memory only:
 
 ```python
 result = engine.generate_api(
@@ -278,19 +145,7 @@ result = engine.generate_api(
 )
 ```
 
-Use dry-run first to inspect:
-
-```python
-print(result.diff)
-```
-
-Only write files after reviewing them.
-
----
-
-## 8. Writing Files to Disk
-
-To actually create files:
+To write files to disk:
 
 ```python
 result = engine.generate_api(
@@ -299,23 +154,11 @@ result = engine.generate_api(
 )
 ```
 
-ArchAPI protects existing files.
-
-If a generated file already exists, ArchAPI raises:
-
-```text
-FileExistsError
-```
-
-This prevents accidental overwrites.
+ArchAPI raises `FileExistsError` if a generated file already exists.
 
 ---
 
-## 9. Express TypeScript Example
-
-This example creates a tiny Express TypeScript project and asks ArchAPI to generate a new API.
-
-Run this in Python:
+## 8. Express TypeScript Example
 
 ```python
 from pathlib import Path
@@ -330,8 +173,7 @@ project = Path("express_basic")
 (project / "tests").mkdir(parents=True, exist_ok=True)
 
 (project / "package.json").write_text(
-    '{"dependencies": {"express": "^4.18.0", "zod": "^3.0.0"}, '
-    '"devDependencies": {"jest": "^29.0.0", "supertest": "^6.0.0"}}'
+    '{"dependencies": {"express": "^4.18.0", "zod": "^3.0.0"}}'
 )
 
 (project / "src/routes/user.routes.ts").write_text(
@@ -357,10 +199,7 @@ project = Path("express_basic")
 )
 
 engine = ArchAPI(str(project))
-result = engine.generate_api(
-    "Create GET API for user order history",
-    dry_run=True,
-)
+result = engine.generate_api("Create GET API for user order history", dry_run=True)
 
 print("Detected framework:", engine.detect_framework().framework)
 print("Generated method:", result.plan.method)
@@ -368,22 +207,17 @@ print("Generated path:", result.plan.path)
 print("Generated files:", [str(file.path) for file in result.files])
 ```
 
-Expected output:
+Expected output includes:
 
 ```text
 Detected framework: express-typescript
 Generated method: GET
 Generated path: /users/{user_id}/orders
-Generated files: ['src/routes/order.routes.ts', 'src/controllers/order.controller.ts', 'src/services/order.service.ts', 'src/schemas/order.schema.ts', 'tests/order.test.ts']
 ```
 
 ---
 
-## 10. FastAPI Example
-
-This example creates a tiny FastAPI project and asks ArchAPI to generate a new API.
-
-Run this in Python:
+## 9. FastAPI Example
 
 ```python
 from pathlib import Path
@@ -421,10 +255,7 @@ project = Path("fastapi_basic")
 )
 
 engine = ArchAPI(str(project))
-result = engine.generate_api(
-    "Create POST API for product review",
-    dry_run=True,
-)
+result = engine.generate_api("Create POST API for product review", dry_run=True)
 
 print("Detected framework:", engine.detect_framework().framework)
 print("Generated method:", result.plan.method)
@@ -432,27 +263,19 @@ print("Generated path:", result.plan.path)
 print("Generated files:", [str(file.path) for file in result.files])
 ```
 
-Expected output:
+Expected output includes:
 
 ```text
 Detected framework: fastapi
 Generated method: POST
 Generated path: /products/{product_id}/reviews
-Generated files: ['app/routers/review_router.py', 'app/services/review_service.py', 'app/schemas/review_schema.py', 'tests/test_review.py']
 ```
 
 ---
 
-## 11. Strict Config Mode
+## 10. Strict Config Mode
 
-Use strict config mode when:
-
-- the project has a custom folder structure
-- the framework is known but automatic detection is not enough
-- the repository contains multiple projects
-- you only want ArchAPI to scan specific folders
-
-Example for Express TypeScript:
+Use strict config mode when the project has a custom folder structure or the repository contains multiple projects.
 
 ```python
 from archapi import ArchAPI
@@ -477,48 +300,11 @@ result = engine.generate_api(
 print(result.diff)
 ```
 
-When strict config is used, ArchAPI scans only the configured folders.
-
 ---
 
-## 12. Low-Confidence Blocking
+## 11. Security Features
 
-ArchAPI blocks generation when it cannot confidently detect the framework or architecture.
-
-Example:
-
-```python
-from archapi import ArchAPI
-
-engine = ArchAPI("./unknown_project")
-
-plan = engine.plan_api("Create GET API for user order history")
-
-print(plan.generation_allowed)
-print(plan.reason)
-```
-
-Possible output:
-
-```text
-False
-Framework could not be confidently detected. Provide framework or config before generation.
-```
-
-Another possible output:
-
-```text
-False
-Architecture confidence too low for code generation. Missing: route style, controller style, service style, schema style
-```
-
-This prevents ArchAPI from generating files into the wrong kind of project.
-
----
-
-## 13. Security Features
-
-ArchAPI includes baseline safeguards:
+ArchAPI includes:
 
 - dry-run generation by default
 - overwrite protection
@@ -528,97 +314,9 @@ ArchAPI includes baseline safeguards:
 - context redaction
 - secret scanning helpers
 
-Example redaction:
-
-```python
-from archapi import ArchAPI
-
-engine = ArchAPI("./some_project")
-
-text = 'API_KEY="1234567890abcdef" TOKEN="abcdef1234567890"'
-print(engine.redact_context(text))
-```
-
-Expected output includes:
-
-```text
-[REDACTED_API_KEY]
-[REDACTED_TOKEN]
-```
-
 ---
 
-## 14. Cache and Changed Files
-
-ArchAPI can save a snapshot of the detected project structure and later report changed files.
-
-Example:
-
-```python
-from archapi import ArchAPI
-
-engine = ArchAPI("./my_backend_project")
-
-engine.scan()
-engine.build_maps()
-engine.extract_genome()
-
-engine.save_cache()
-
-print(engine.changed_files())
-```
-
-Expected immediately after saving cache:
-
-```text
-[]
-```
-
-The cache is stored inside:
-
-```text
-.archapi/
-```
-
-This folder should not be committed to Git.
-
----
-
-## 15. Project Structure
-
-The GitHub repository has this main structure:
-
-```text
-archapi/
-  core.py
-  types.py
-  frameworks/
-  planning/
-  indexing/
-  security/
-  validation/
-
-sample_projects/
-  express_basic/
-  fastapi_basic/
-
-tests/
-  test_archapi_suite.py
-
-docs/
-  HOW_TO_RUN.md
-  ARCHITECTURE.md
-  FILE_GUIDE.md
-  SECURITY_MEASURES.md
-  DEVELOPMENT_STATUS.md
-
-scripts/
-  run_tests.sh
-```
-
----
-
-## 16. Common Issues
+## 12. Common Issues
 
 ### `pip: command not found`
 
@@ -628,44 +326,22 @@ Use:
 python -m pip install archapi
 ```
 
-instead of:
-
-```bash
-pip install archapi
-```
-
----
-
 ### Editable install fails from GitHub source
 
-Upgrade pip and setuptools:
+Run:
 
 ```bash
 python -m pip install --upgrade pip setuptools wheel
 python -m pip install -e .
 ```
 
----
-
 ### `heredoc>` appears in terminal
 
-This usually means markdown backticks or an unfinished heredoc were pasted into the shell.
-
-Press:
-
-```text
-Ctrl + C
-```
-
-Then rerun only the actual shell command, without markdown fences such as triple backticks.
-
----
+Press `Ctrl + C`, then rerun only the actual shell command without markdown fences.
 
 ### Git clone says destination already exists
 
-Do not clone inside a folder that already has an `archapi/` package directory.
-
-Use a clean location:
+Use a clean folder:
 
 ```bash
 cd /tmp
@@ -675,69 +351,7 @@ cd archapi-github-test
 
 ---
 
-### Tests fail after cloning from GitHub
-
-Make sure pip and setuptools are upgraded first:
-
-```bash
-python -m pip install --upgrade pip setuptools wheel
-python -m pip install -e .
-python -m unittest tests.test_archapi_suite -v
-```
-
----
-
-## 17. Maintainer Build and Publish Checks
-
-These steps are for maintainers only.
-
-Install build tools:
-
-```bash
-python -m pip install --upgrade build twine
-```
-
-Clean old build output:
-
-```bash
-rm -rf dist build archapi.egg-info
-```
-
-Build package:
-
-```bash
-python -m build
-```
-
-Check package:
-
-```bash
-python -m twine check dist/*
-```
-
-Expected:
-
-```text
-PASSED
-```
-
-Upload to TestPyPI:
-
-```bash
-python -m twine upload --repository testpypi dist/*
-```
-
-Upload to PyPI:
-
-```bash
-python -m twine upload dist/*
-```
-
-Use API tokens when uploading. Do not paste tokens into source files, GitHub, documentation, chat, or terminal logs that may be shared.
-
----
-
-## 18. Project Links
+## 13. Links
 
 GitHub:
 
@@ -749,16 +363,4 @@ PyPI:
 
 ```text
 https://pypi.org/project/archapi/
-```
-
-Install from PyPI:
-
-```bash
-python -m pip install archapi
-```
-
-Basic import:
-
-```python
-from archapi import ArchAPI
 ```

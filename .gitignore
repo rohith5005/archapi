@@ -12,3 +12,7 @@ coverage/
 node_modules/
 *.docx
 *.pdf
+project_structure_full.txt
+test.txt
+fastapi_basic/
+express_basic/
