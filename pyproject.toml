@@ -12,7 +12,7 @@ requires-python = ">=3.9"
 authors = [
   { name = "Rohith Chikkala" }
 ]
-dependencies = []
+dependencies = ["certifi>=2024.0.0"]
 keywords = ["rest-api", "code-generation", "architecture", "express", "fastapi"]
 
 classifiers = [
