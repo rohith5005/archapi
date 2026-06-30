@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
 from archapi.frameworks.detector import FrameworkDetector
 from archapi.frameworks.registry import FrameworkRegistry
@@ -15,19 +15,33 @@ from archapi.types import (
     APIGenome,
     APIPlan,
     DetectionResult,
+    GeneratedFile,
     GenerationResult,
     ScanResult,
+    ValidationReport,
 )
 
 
 class ArchAPI:
-    def __init__(self, project_path: Union[str, Path], framework: Optional[str] = None, config: Optional[Dict[str, Any]] = None):
+    def __init__(
+        self,
+        project_path: Union[str, Path],
+        framework: Optional[str] = None,
+        config: Optional[Dict[str, Any]] = None,
+        use_llm: bool = False,
+        llm_model: str = "gpt-4o-mini",
+        llm_provider=None,
+        api_key: Optional[str] = None,
+    ):
         self.project_path = Path(project_path).resolve()
         if not self.project_path.exists():
             raise FileNotFoundError(f"Project path does not exist: {self.project_path}")
 
         self._framework_override = framework
         self._config = config or {}
+        self._use_llm = use_llm
+        self._llm_model = llm_model
+        self._api_key = api_key
         self._detector = FrameworkDetector()
         self._registry = FrameworkRegistry()
         self._cache = CacheManager(self.project_path)
@@ -41,6 +55,9 @@ class ArchAPI:
         self._scan: Optional[ScanResult] = None
         self._maps: Optional[Dict[str, Any]] = None
         self._genome: Optional[APIGenome] = None
+
+        # Resolve LLM provider (lazy — only initialised when use_llm=True)
+        self._llm = llm_provider  # may be None; initialised in _resolve_llm()
 
     def detect_framework(self) -> DetectionResult:
         if self._framework_override:
@@ -270,9 +287,23 @@ class ArchAPI:
         if detection.framework in {"express-typescript", "nestjs", "node-unknown"}:
             return self._command_validator.validate_node_project()
 
+        # Python-based frameworks use Python project validation
+        if detection.framework in {"fastapi", "flask", "django-drf"}:
+            return self._command_validator.validate_python_project()
+
+        # Default fallback for unrecognised frameworks
         return self._command_validator.validate_node_project()
 
     def generate_api(self, request: str, dry_run: bool = True) -> GenerationResult:
+        if self._use_llm:
+            return self._generate_with_llm(request, dry_run=dry_run)
+        return self._generate_deterministic(request, dry_run=dry_run)
+
+    # ------------------------------------------------------------------
+    # Deterministic generation path (original behaviour)
+    # ------------------------------------------------------------------
+
+    def _generate_deterministic(self, request: str, dry_run: bool = True) -> GenerationResult:
         maps = self._maps or self.build_maps()
         genome = self._genome or self.extract_genome()
         plan = self.plan_api(request)
@@ -293,3 +324,118 @@ class ArchAPI:
             result.apply()
 
         return result
+
+    # ------------------------------------------------------------------
+    # LLM-first generation path (Phase 5)
+    # ------------------------------------------------------------------
+
+    def _generate_with_llm(self, request: str, dry_run: bool = True) -> GenerationResult:
+        """Generate API files using an LLM with architecture-aware prompting."""
+        from archapi.llm.prompt_builder import PromptBuilder
+        from archapi.llm.response_parser import ResponseParser
+        from archapi.llm.errors import LLMProviderError, LLMParseError
+
+        genome = self._genome or self.extract_genome()
+        scan = self._scan or self.scan()
+
+        llm = self._resolve_llm()
+
+        prompt = PromptBuilder().build(request, genome, scan)
+
+        try:
+            raw_response = llm.complete(prompt)
+        except LLMProviderError as exc:
+            # Return a blocked result rather than raising, so callers can inspect
+            empty_plan = APIPlan(
+                request=request,
+                method="GET",
+                path="/",
+                entities=[],
+                layers=[],
+                generation_allowed=False,
+                reason=f"LLM provider error: {exc}",
+            )
+            return GenerationResult(
+                project_path=self.project_path,
+                plan=empty_plan,
+                files=[],
+                validation_report=ValidationReport(
+                    success=False,
+                    errors=[str(exc)],
+                ),
+            )
+
+        try:
+            plan, files = ResponseParser().parse(raw_response)
+        except LLMParseError as exc:
+            empty_plan = APIPlan(
+                request=request,
+                method="GET",
+                path="/",
+                entities=[],
+                layers=[],
+                generation_allowed=False,
+                reason=f"LLM parse error: {exc}",
+            )
+            return GenerationResult(
+                project_path=self.project_path,
+                plan=empty_plan,
+                files=[],
+                validation_report=ValidationReport(
+                    success=False,
+                    errors=[str(exc)],
+                ),
+            )
+
+        # Stamp the request onto the plan
+        plan.request = request
+
+        # Run safety checks
+        warnings: List[str] = []
+        policy = self._policy_gate.validate_result(
+            GenerationResult(
+                project_path=self.project_path,
+                plan=plan,
+                files=files,
+                validation_report=ValidationReport(success=True),
+            )
+        )
+        if not policy.allowed:
+            plan.generation_allowed = False
+            plan.reason = "; ".join(policy.errors)
+
+        # Architecture consistency score
+        arch_score = self._architecture_scorer.score(files, genome)
+        if arch_score.percentage < 50:
+            warnings.append(
+                f"Architecture consistency score is low ({arch_score.percentage:.0f}%). "
+                "Review generated files carefully."
+            )
+
+        report = ValidationReport(
+            success=plan.generation_allowed and policy.allowed,
+            errors=policy.errors if not policy.allowed else [],
+            warnings=warnings,
+        )
+
+        result = GenerationResult(
+            project_path=self.project_path,
+            plan=plan,
+            files=files,
+            validation_report=report,
+            warnings=warnings,
+        )
+
+        if not dry_run and report.success:
+            result.apply()
+
+        return result
+
+    def _resolve_llm(self):
+        """Lazily initialise the LLM provider if not already set."""
+        if self._llm is not None:
+            return self._llm
+
+        from archapi.llm.openai_provider import OpenAIProvider
+        self._llm = OpenAIProvider(model=self._llm_model, api_key=self._api_key)
+        return self._llm

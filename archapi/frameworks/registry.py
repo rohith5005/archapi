@@ -3,6 +3,9 @@ from __future__ import annotations
 from archapi.frameworks.generic import GenericAdapter
 from archapi.frameworks.express_ts.adapter import ExpressTypeScriptAdapter
 from archapi.frameworks.fastapi_adapter import FastAPIAdapter
+from archapi.frameworks.flask_adapter import FlaskAdapter
+from archapi.frameworks.nestjs.adapter import NestJSAdapter
+from archapi.frameworks.django_drf_adapter import DjangoDRFAdapter
 
 
 class FrameworkRegistry:
@@ -12,10 +15,10 @@ class FrameworkRegistry:
         self._adapters = {
             "generic": generic,
             "express-typescript": ExpressTypeScriptAdapter(),
-            "nestjs": generic,
+            "nestjs": NestJSAdapter(),
             "fastapi": FastAPIAdapter(),
-            "django-drf": generic,
-            "flask": generic,
+            "flask": FlaskAdapter(),
+            "django-drf": DjangoDRFAdapter(),
             "spring-boot": generic,
             "dotnet-core": generic,
             "laravel": generic,
@@ -26,3 +29,4 @@ class FrameworkRegistry:
 
     def get(self, framework: str):
         return self._adapters.get(framework, self._adapters["generic"])
+
