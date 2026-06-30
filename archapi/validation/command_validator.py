@@ -109,7 +109,26 @@ class CommandValidator:
         success = all(result.success for result in results)
         return CommandValidationReport(success=success, results=results)
 
+    def validate_python_project(self) -> CommandValidationReport:
+        """Validate a Python project by checking for pytest and optional lint tools."""
+        checks = [
+            ("pytest", ["python", "-m", "pytest", "--tb=short", "-q"]),
+            ("ruff", ["python", "-m", "ruff", "check", "."]),
+        ]
+
+        results: List[CommandResult] = []
+
+        for name, command in checks:
+            # Skip if the tool is not installed; treat as non-fatal skip
+            results.append(self._run(name, command))
+
+        # Python project validation succeeds as long as no command hard-failed
+        # (skipped = tool not found is still considered success)
+        success = all(result.success for result in results)
+        return CommandValidationReport(success=success, results=results)
+
     def _run(self, name: str, command: List[str]) -> CommandResult:
+
         try:
             completed = subprocess.run(
                 command,
