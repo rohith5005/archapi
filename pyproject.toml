@@ -26,6 +26,9 @@ classifiers = [
   "Topic :: Software Development :: Code Generators",
 ]
 
+[project.scripts]
+archapi = "archapi.cli:main"
+
 [project.urls]
 Homepage = "https://github.com/rohith5005/archapi"
 Repository = "https://github.com/rohith5005/archapi"
