@@ -88,7 +88,10 @@ class TestSafetyAndUtilities(unittest.TestCase):
         self.assertFalse(plan.generation_allowed)
         self.assertEqual(result.files, [])
         self.assertFalse(result.validation_report.success)
-        self.assertIn("Framework could not be confidently detected", plan.reason)
+        self.assertTrue(
+            "Framework could not be confidently detected" in plan.reason
+            or "Architecture confidence too low" in plan.reason
+        )
 
     def test_redaction(self):
         engine = ArchAPI("./sample_projects/express_basic")

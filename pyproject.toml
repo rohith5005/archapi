@@ -6,11 +6,31 @@ build-backend = "setuptools.build_meta"
 name = "archapi"
 version = "0.3.0"
 description = "Architecture-preserving REST API synthesis library"
+readme = "README.md"
+license = "MIT"
 requires-python = ">=3.9"
 authors = [
   { name = "ArchAPI Research Team" }
 ]
 dependencies = []
+
+keywords = ["rest-api", "code-generation", "architecture", "express", "fastapi"]
+
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Software Development :: Code Generators",
+]
+
+[project.urls]
+Homepage = "https://github.com/rohith5005/archapi"
+Repository = "https://github.com/rohith5005/archapi"
+Issues = "https://github.com/rohith5005/archapi/issues"
 
 [tool.setuptools.packages.find]
 include = ["archapi*"]
