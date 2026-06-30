@@ -7,8 +7,19 @@ from archapi.frameworks.generic import GenericAdapter
 from archapi.types import APIPlan, APIGenome, GeneratedFile, ScanResult, ValidationReport
 
 
-class DjangoRestFrameworkAdapter(GenericAdapter):
+class DjangoDRFAdapter(GenericAdapter):
+    """
+    Framework adapter for Django REST Framework (Python).
+
+    Generates ViewSet-based views, serializers, URL configuration, and pytest-django
+    tests that match DRF conventions.
+    """
+
     name = "django-drf"
+
+    # ------------------------------------------------------------------
+    # Scan / genome
+    # ------------------------------------------------------------------
 
     def scan(self, project_path: Path) -> ScanResult:
         result = super().scan(project_path)
@@ -19,33 +30,35 @@ class DjangoRestFrameworkAdapter(GenericAdapter):
         genome = super().extract_genome(maps, scan_result)
         genome.framework = self.name
 
-        req = scan_result.project_path / "requirements.txt"
-        pyproject = scan_result.project_path / "pyproject.toml"
-
-        dep_text = ""
-        if req.exists():
-            dep_text += req.read_text(encoding="utf-8", errors="ignore").lower()
-        if pyproject.exists():
-            dep_text += pyproject.read_text(encoding="utf-8", errors="ignore").lower()
+        dep_text = self._dep_text(scan_result.project_path)
 
         has_drf = "djangorestframework" in dep_text or "rest_framework" in dep_text
-        has_manage = (scan_result.project_path / "manage.py").exists()
+        has_django = "django" in dep_text
 
+        # ViewSet vs APIView detection: prefer ViewSet if models found
         genome.route_style = "drf-router" if scan_result.routes else "unknown"
-        genome.controller_style = "drf-viewset" if scan_result.controllers or scan_result.routes else "unknown"
+        genome.controller_style = (
+            "drf-viewset" if scan_result.models else
+            ("drf-apiview" if scan_result.controllers or scan_result.routes else "unknown")
+        )
         genome.service_style = "service-layer" if scan_result.services else "unknown"
-        genome.schema_style = "drf-serializer" if scan_result.schemas else "unknown"
-        genome.test_style = "pytest-django" if "pytest" in dep_text else "django-testcase"
+        genome.schema_style = "drf-serializer" if (has_drf or scan_result.schemas) else "unknown"
+        genome.test_style = "pytest-django" if ("pytest" in dep_text or scan_result.tests) else "unknown"
         genome.metadata["language"] = "python"
         genome.metadata["project_path"] = str(scan_result.project_path)
 
-        if not has_manage:
-            genome.confidence = min(genome.confidence, 0.20)
+        if not has_django:
+            genome.confidence = min(genome.confidence, 0.35)
+            genome.metadata["dependency_warning"] = "Django dependency not found."
         elif not has_drf:
             genome.confidence = min(genome.confidence, 0.55)
-            genome.metadata["dependency_warning"] = "djangorestframework not found in dependencies."
+            genome.metadata["dependency_warning"] = "djangorestframework not found — DRF may not be in use."
 
         return genome
+
+    # ------------------------------------------------------------------
+    # Code generation
+    # ------------------------------------------------------------------
 
     def generate_code(
         self,
@@ -60,65 +73,95 @@ class DjangoRestFrameworkAdapter(GenericAdapter):
         entity_pascal = entity[0].upper() + entity[1:]
         entity_lower = entity_pascal[0].lower() + entity_pascal[1:]
         entity_file = entity_lower.lower()
-        entity_upper = entity_lower.upper()
 
-        app_dir = self._output_dir(maps, "route_map", f"api/{entity_file}")
+        # Detect the app directory from existing routes / views
+        app_dir = self._detect_app_dir(maps)
 
-        serializer_path = app_dir / "serializers.py"
         views_path = app_dir / "views.py"
+        serializers_path = app_dir / "serializers.py"
         urls_path = app_dir / "urls.py"
-        test_path = app_dir / "tests.py"
+        test_path = Path("tests") / f"test_{entity_file}.py"
 
-        serializer_content = f'''from rest_framework import serializers
+        method = plan.method  # GET / POST / PUT / DELETE / PATCH
+        http_path = plan.path
+        action = plan.metadata.get("action", "unknown")
+        status_code = int(plan.metadata.get("response_status", 200))
 
+        viewset_style = genome.controller_style == "drf-viewset"
 
-class {entity_pascal}Serializer(serializers.Serializer):
-    id = serializers.IntegerField(read_only=True)
-    name = serializers.CharField(max_length=255)
-    created_at = serializers.DateTimeField(read_only=True)
-
-    def create(self, validated_data):
-        raise NotImplementedError("Replace with {entity_pascal} model creation logic.")
-
-    def update(self, instance, validated_data):
-        raise NotImplementedError("Replace with {entity_pascal} model update logic.")
-'''
-
-        views_content = f'''from rest_framework import status, viewsets
+        # ------------------------------------------------------------------
+        # views.py
+        # ------------------------------------------------------------------
+        if viewset_style:
+            views_content = f'''from rest_framework import viewsets, status
 from rest_framework.response import Response
-
 from .serializers import {entity_pascal}Serializer
 
 
 class {entity_pascal}ViewSet(viewsets.ViewSet):
+    """
+    ViewSet for {entity_pascal} — generated by ArchAPI.
+    """
+
     def list(self, request):
-        # TODO: Replace with queryset from {entity_pascal} model.
-        data = []
-        serializer = {entity_pascal}Serializer(data, many=True)
-        return Response(serializer.data)
+        # TODO: Replace with real queryset logic.
+        return Response(
+            {{"message": "{entity_pascal} list placeholder", "action": "{action}"}},
+            status=status.HTTP_200_OK,
+        )
 
     def create(self, request):
         serializer = {entity_pascal}Serializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        serializer.save()
-        return Response(serializer.data, status=status.HTTP_201_CREATED)
+        if serializer.is_valid():
+            # TODO: Persist the object here.
+            return Response(serializer.validated_data, status=status.HTTP_{status_code}_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     def retrieve(self, request, pk=None):
-        # TODO: Replace with {entity_pascal}.objects.get(pk=pk).
-        return Response({{"id": pk, "name": "placeholder"}})
+        return Response(
+            {{"message": "{entity_pascal} detail placeholder", "pk": pk}},
+            status=status.HTTP_200_OK,
+        )
+'''
+        else:
+            # APIView style
+            views_content = f'''from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status
+from .serializers import {entity_pascal}Serializer
 
-    def update(self, request, pk=None):
-        serializer = {entity_pascal}Serializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        return Response(serializer.data)
 
-    def destroy(self, request, pk=None):
-        return Response(status=status.HTTP_204_NO_CONTENT)
+class {entity_pascal}View(APIView):
+    """
+    APIView for {entity_pascal} — generated by ArchAPI.
+    """
+
+    def {method.lower()}(self, request, *args, **kwargs):
+        # TODO: Replace this placeholder with project-specific business logic.
+        return Response(
+            {{"message": "{entity_pascal} API placeholder response", "action": "{action}"}},
+            status=status.HTTP_{status_code}_OK if {status_code} == 200 else status.HTTP_{status_code}_CREATED,
+        )
 '''
 
-        urls_content = f'''from django.urls import include, path
-from rest_framework.routers import DefaultRouter
+        # ------------------------------------------------------------------
+        # serializers.py
+        # ------------------------------------------------------------------
+        serializers_content = f'''from rest_framework import serializers
 
+
+class {entity_pascal}Serializer(serializers.Serializer):
+    message = serializers.CharField(default="{entity_pascal} response")
+    action = serializers.CharField(default="{action}")
+    # TODO: Add project-specific fields here.
+'''
+
+        # ------------------------------------------------------------------
+        # urls.py
+        # ------------------------------------------------------------------
+        if viewset_style:
+            urls_content = f'''from django.urls import path, include
+from rest_framework.routers import DefaultRouter
 from .views import {entity_pascal}ViewSet
 
 router = DefaultRouter()
@@ -128,35 +171,37 @@ urlpatterns = [
     path("", include(router.urls)),
 ]
 '''
+        else:
+            urls_content = f'''from django.urls import path
+from .views import {entity_pascal}View
 
-        test_content = f'''from django.test import TestCase
-from django.urls import reverse
-from rest_framework import status
-from rest_framework.test import APIClient
+urlpatterns = [
+    path("{http_path.lstrip("/")}", {entity_pascal}View.as_view(), name="{entity_file}-api"),
+]
+'''
+
+        # ------------------------------------------------------------------
+        # tests/test_<entity>.py
+        # ------------------------------------------------------------------
+        test_content = f'''import pytest
 
 
-class {entity_pascal}APITestCase(TestCase):
-    def setUp(self):
-        self.client = APIClient()
-
-    def test_list_{entity_file}s(self):
-        url = reverse("{entity_file}-list")
-        response = self.client.get(url)
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-
-    def test_create_{entity_file}(self):
-        url = reverse("{entity_file}-list")
-        data = {{"name": "test {entity_lower}"}}
-        response = self.client.post(url, data, format="json")
-        self.assertIn(response.status_code, [status.HTTP_201_CREATED, status.HTTP_400_BAD_REQUEST])
+@pytest.mark.django_db
+def test_{entity_lower}_placeholder(client):
+    # TODO: Replace this placeholder with a real API test.
+    assert True
 '''
 
         return [
-            GeneratedFile(path=serializer_path, content=serializer_content),
-            GeneratedFile(path=views_path, content=views_content),
-            GeneratedFile(path=urls_path, content=urls_content),
-            GeneratedFile(path=test_path, content=test_content),
+            GeneratedFile(views_path, views_content),
+            GeneratedFile(serializers_path, serializers_content),
+            GeneratedFile(urls_path, urls_content),
+            GeneratedFile(test_path, test_content),
         ]
+
+    # ------------------------------------------------------------------
+    # Validation
+    # ------------------------------------------------------------------
 
     def validate_generated_code(
         self,
@@ -164,28 +209,57 @@ class {entity_pascal}APITestCase(TestCase):
         plan: APIPlan,
         genome: APIGenome,
     ) -> ValidationReport:
-        errors = []
-        warnings = []
+        errors: List[str] = []
+        warnings: List[str] = []
 
         if not plan.generation_allowed:
             errors.append(plan.reason or "Generation not allowed.")
 
-        if plan.generation_allowed and not files:
-            errors.append("No files generated.")
+        required_names = ["views.py", "serializers.py", "urls.py"]
+        generated_names = [Path(file.path).name for file in files]
 
-        for f in files:
-            if not f.content.strip():
-                errors.append(f"Generated file is empty: {f.path}")
+        for name in required_names:
+            if name not in generated_names:
+                errors.append(f"Missing generated DRF layer: {name}")
 
-        if genome.metadata.get("dependency_warning"):
-            warnings.append(genome.metadata["dependency_warning"])
+        if not any("test_" in Path(file.path).name for file in files):
+            errors.append("Missing generated DRF test layer.")
+
+        for file in files:
+            if not file.content.strip():
+                errors.append(f"Generated file is empty: {file.path}")
+            if Path(file.path).exists():
+                warnings.append(
+                    f"Generated file path already exists relative to current directory: {file.path}"
+                )
+
+        if genome.confidence < 0.75:
+            warnings.append("Architecture confidence is moderate; review generated files before applying.")
 
         return ValidationReport(success=not errors, errors=errors, warnings=warnings)
 
-    def _output_dir(self, maps: Dict[str, Any], map_key: str, default: str) -> Path:
-        raw = maps.get(map_key)
-        if raw and isinstance(raw, dict):
-            paths = list(raw.values())
-            if paths:
-                return Path(paths[0]).parent
-        return Path(default)
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    def _dep_text(self, project_path: Path) -> str:
+        text = ""
+        for fname in ("requirements.txt", "pyproject.toml", "setup.cfg", "Pipfile"):
+            p = project_path / fname
+            if p.exists():
+                text += p.read_text(encoding="utf-8", errors="ignore").lower()
+        return text
+
+    def _detect_app_dir(self, maps: Dict[str, Any]) -> Path:
+        """Infer the primary app directory from the route/controller/service maps."""
+        for map_key in ("route_map", "controller_map", "service_map"):
+            values = maps.get(map_key, {})
+            project_path = Path(maps.get("_project_path", "."))
+            if isinstance(values, dict) and values:
+                first_path = Path(next(iter(values.values()))).resolve()
+                parent = first_path.parent
+                try:
+                    return parent.relative_to(project_path)
+                except ValueError:
+                    pass
+        return Path("api")  # sensible DRF default
