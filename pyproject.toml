@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "archapi"
+version = "0.3.0"
+description = "Architecture-preserving REST API synthesis library"
+requires-python = ">=3.9"
+authors = [
+  { name = "ArchAPI Research Team" }
+]
+dependencies = []
+
+[tool.setuptools.packages.find]
+include = ["archapi*"]

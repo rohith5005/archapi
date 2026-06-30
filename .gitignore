@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.env
+.env.*
+.DS_Store
+dist/
+build/
+coverage/
+.archapi/
+node_modules/
+*.docx
+*.pdf
