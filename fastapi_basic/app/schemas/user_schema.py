@@ -1,1 +1,0 @@
-from pydantic import BaseModel\n\nclass UserResponse(BaseModel):\n    id: str\n
