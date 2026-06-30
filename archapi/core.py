@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
-from typing import Any, Dict, Optional, Union
+from typing import Any, Callable, Dict, Optional, Union
 
 from archapi.frameworks.detector import FrameworkDetector
 from archapi.frameworks.registry import FrameworkRegistry
@@ -272,13 +273,28 @@ class ArchAPI:
 
         return self._command_validator.validate_node_project()
 
-    def generate_api(self, request: str, dry_run: bool = True) -> GenerationResult:
+    def generate_api(
+        self,
+        request: str,
+        dry_run: bool = True,
+        progress: Optional[Callable[[str], None]] = None,
+    ) -> GenerationResult:
+        def _emit(msg: str) -> None:
+            if progress:
+                progress(msg)
+
+        _emit("scanning project")
         maps = self._maps or self.build_maps()
         genome = self._genome or self.extract_genome()
+
+        _emit("planning API")
         plan = self.plan_api(request)
 
+        _emit("generating code")
         adapter = self._adapter()
         files = adapter.generate_code(plan, genome, maps)
+
+        _emit("validating output")
         report = adapter.validate_generated_code(files, plan, genome)
 
         result = GenerationResult(
@@ -290,6 +306,20 @@ class ArchAPI:
         )
 
         if not dry_run and report.success:
+            _emit("writing files")
             result.apply()
 
+        _emit("done")
         return result
+
+    async def generate_api_async(
+        self,
+        request: str,
+        dry_run: bool = True,
+        progress: Optional[Callable[[str], None]] = None,
+    ) -> GenerationResult:
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None,
+            lambda: self.generate_api(request, dry_run=dry_run, progress=progress),
+        )
