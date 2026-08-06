@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
@@ -306,10 +307,15 @@ class ArchAPI:
     def _generate_deterministic(self, request: str, dry_run: bool = True) -> GenerationResult:
         maps = self._maps or self.build_maps()
         genome = self._genome or self.extract_genome()
+
+        _emit("planning API")
         plan = self.plan_api(request)
 
+        _emit("generating code")
         adapter = self._adapter()
         files = adapter.generate_code(plan, genome, maps)
+
+        _emit("validating output")
         report = adapter.validate_generated_code(files, plan, genome)
 
         result = GenerationResult(
@@ -321,8 +327,10 @@ class ArchAPI:
         )
 
         if not dry_run and report.success:
+            _emit("writing files")
             result.apply()
 
+        _emit("done")
         return result
 
     # ------------------------------------------------------------------
