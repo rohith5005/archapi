@@ -323,7 +323,7 @@ class ArchAPI:
         _emit("validating output")
         report = adapter.validate_generated_code(files, plan, genome)
 
-        policy = self._policy_gate.validate_files(files)
+        policy = self._policy_gate.validate_files(files, plan)
         report.errors.extend(policy.errors)
         report.warnings.extend(policy.warnings)
         report.success = report.success and policy.allowed
@@ -386,22 +386,6 @@ class ArchAPI:
 
         try:
             plan, files = ResponseParser().parse(raw_response)
-        except Exception as exc:
-            fallback_plan = self.plan_api(request)
-            fallback_plan.generation_allowed = False
-            fallback_plan.reason = f"LLM response could not be parsed: {exc}"
-
-            return GenerationResult(
-                project_path=self.project_path,
-                plan=fallback_plan,
-                files=[],
-                validation_report=ValidationReport(
-                    success=False,
-                    errors=[fallback_plan.reason],
-                    warnings=[],
-                ),
-                warnings=[],
-            )
         except LLMParseError as exc:
             empty_plan = APIPlan(
                 request=request,
@@ -425,40 +409,36 @@ class ArchAPI:
         # Stamp the request onto the plan
         plan.request = request
 
-        # Run safety checks
-        warnings: List[str] = []
-        policy = self._policy_gate.validate_result(
-            GenerationResult(
-                project_path=self.project_path,
-                plan=plan,
-                files=files,
-                validation_report=ValidationReport(success=True),
-            )
-        )
-        if not policy.allowed:
-            plan.generation_allowed = False
-            plan.reason = "; ".join(policy.errors)
+        # Same structural validation the deterministic path gets: required
+        # layers present, no empty files, etc.
+        adapter = self._adapter()
+        report = adapter.validate_generated_code(files, plan, genome)
+
+        # Output safety gate: path containment, protected/bootstrap/config
+        # files, unrequested middleware, embedded secrets.
+        policy = self._policy_gate.validate_files(files, plan)
+        report.errors.extend(policy.errors)
+        report.warnings.extend(policy.warnings)
+        report.success = report.success and policy.allowed
 
         # Architecture consistency score
         arch_score = self._architecture_scorer.score(files, genome)
         if arch_score.percentage < 50:
-            warnings.append(
+            report.warnings.append(
                 f"Architecture consistency score is low ({arch_score.percentage:.0f}%). "
                 "Review generated files carefully."
             )
 
-        report = ValidationReport(
-            success=plan.generation_allowed and policy.allowed,
-            errors=policy.errors if not policy.allowed else [],
-            warnings=warnings,
-        )
+        plan.generation_allowed = report.success
+        if not report.success:
+            plan.reason = "; ".join(report.errors)
 
         result = GenerationResult(
             project_path=self.project_path,
             plan=plan,
             files=files,
             validation_report=report,
-            warnings=warnings,
+            warnings=report.warnings,
         )
 
         if not dry_run and report.success:

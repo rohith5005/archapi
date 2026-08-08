@@ -4,168 +4,128 @@ import json
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
+from archapi.llm.errors import LLMParseError
 from archapi.types import APIPlan, GeneratedFile
 
 
-class LLMResponseParser:
-    """Parses LLM JSON into ArchAPI plan and generated files."""
+_REQUIRED_TOP_LEVEL = {"method", "path", "entities", "files"}
+_REQUIRED_FILE_KEYS = {"path", "content"}
 
-    def parse_generation_response(
-        self,
-        request: str,
-        raw_text: str,
-    ) -> Tuple[APIPlan, List[GeneratedFile]]:
-        data = self._load_json(raw_text)
+_VALID_METHODS = {"GET", "POST", "PUT", "PATCH", "DELETE"}
 
-        plan_data = data.get("plan")
-        files_data = data.get("files")
 
-        if not isinstance(plan_data, dict):
-            raise ValueError("LLM response must contain a plan object.")
+class ResponseParser:
+    """
+    Parses the raw JSON string returned by an LLM provider into
+    an ``APIPlan`` + ``List[GeneratedFile]`` pair.
 
-        if not isinstance(files_data, list) or not files_data:
-            raise ValueError("LLM response must contain a non-empty files list.")
+    The parser is intentionally lenient about extra fields but strict
+    about required fields and basic data types.
+    """
 
-        metadata = plan_data.get("metadata")
-        if not isinstance(metadata, dict):
-            metadata = {}
+    def parse(self, raw: str) -> Tuple[APIPlan, List[GeneratedFile]]:
+        """
+        Parse *raw* LLM output into an (APIPlan, files) tuple.
 
-        metadata.setdefault("planner", "llm-openai-v0.1")
+        :param raw: Raw string from the LLM (must be valid JSON).
+        :returns: ``(APIPlan, List[GeneratedFile])``
+        :raises LLMParseError: If *raw* is not valid JSON or is missing required fields.
+        """
+        data = self._load_json(raw)
+        self._validate_top_level(data)
 
-        plan = APIPlan(
-            request=str(plan_data.get("request") or request),
-            method=str(plan_data.get("method") or "GET").upper(),
-            path=str(plan_data.get("path") or "/resources/{id}"),
-            entities=[str(item) for item in plan_data.get("entities", ["Resource"])],
-            layers=[str(item) for item in plan_data.get("layers", [])],
-            generation_allowed=bool(plan_data.get("generation_allowed", True)),
-            reason=plan_data.get("reason"),
-            metadata=metadata,
-        )
+        plan = self._build_plan(data)
+        files = self._build_files(data.get("files", []))
 
-        generated_files: List[GeneratedFile] = []
+        return plan, files
 
-        for item in files_data:
-            if not isinstance(item, dict):
-                continue
+    # ------------------------------------------------------------------
+    # Private helpers
+    # ------------------------------------------------------------------
 
-            path = Path(str(item.get("path") or ""))
-            content = str(item.get("content") or "")
+    def _load_json(self, raw: str) -> Dict[str, Any]:
+        """Attempt to parse *raw* as JSON, stripping markdown fences if present."""
+        text = raw.strip()
 
-            if not str(path):
-                raise ValueError("Generated file path is missing.")
-            if path.is_absolute():
-                raise ValueError(f"Generated path must be relative: {path}")
-            if ".." in path.parts:
-                raise ValueError(f"Generated path must not contain '..': {path}")
-            if not content.strip():
-                raise ValueError(f"Generated file content is empty: {path}")
-
-            generated_files.append(
-                GeneratedFile(
-                    path=path,
-                    content=content,
-                    action=str(item.get("action") or "create"),
-                )
-            )
-
-        if not generated_files:
-            raise ValueError("LLM response did not include valid generated files.")
-
-        return plan, generated_files
-
-    def _load_json(self, raw_text: str) -> Dict[str, Any]:
-        text = raw_text.strip()
-
+        # Strip ```json ... ``` or ``` ... ``` fences that the model may add
         if text.startswith("```"):
             lines = text.splitlines()
-            if lines and lines[0].startswith("```"):
-                lines = lines[1:]
-            if lines and lines[-1].startswith("```"):
-                lines = lines[:-1]
-            text = "\n".join(lines).strip()
+            # Remove first and last fence lines
+            inner = lines[1:-1] if lines[-1].strip() == "```" else lines[1:]
+            text = "\n".join(inner).strip()
 
         try:
             return json.loads(text)
-        except json.JSONDecodeError:
-            start = text.find("{")
-            end = text.rfind("}")
-            if start == -1 or end == -1 or end <= start:
-                raise
-            return json.loads(text[start : end + 1])
+        except json.JSONDecodeError as exc:
+            raise LLMParseError(
+                f"LLM response is not valid JSON: {exc}\n\nRaw response:\n{raw[:500]}"
+            ) from exc
 
-# Backward-compatible name used by core.py and tests.
-class ResponseParser(LLMResponseParser):
-    def parse(self, raw_text, request=""):
-        return self.parse_generation_response(
-            request=request,
-            raw_text=raw_text,
-        )
-
-# Compatibility wrapper used by existing core.py and tests.
-class ResponseParser(LLMResponseParser):
-    def parse(self, raw_text, request=""):
-        data = self._load_json(raw_text)
-
-        # New expected shape:
-        # {"plan": {...}, "files": [...]}
-        if isinstance(data.get("plan"), dict):
-            return self.parse_generation_response(
-                request=request,
-                raw_text=raw_text,
+    def _validate_top_level(self, data: Dict[str, Any]) -> None:
+        missing = _REQUIRED_TOP_LEVEL - data.keys()
+        if missing:
+            raise LLMParseError(
+                f"LLM response missing required fields: {sorted(missing)}"
             )
 
-        # Legacy/simple test shape:
-        # {"method": "...", "path": "...", "files": [...]}
-        files_data = data.get("files", [])
-        if not isinstance(files_data, list):
-            files_data = []
+        method = str(data.get("method", "")).upper()
+        if method not in _VALID_METHODS:
+            raise LLMParseError(
+                f"LLM returned invalid HTTP method: '{method}'. "
+                f"Expected one of {sorted(_VALID_METHODS)}."
+            )
 
-        metadata = data.get("metadata")
-        if not isinstance(metadata, dict):
-            metadata = {}
+        if not isinstance(data.get("files"), list):
+            raise LLMParseError("LLM response 'files' must be a list.")
 
-        metadata.setdefault("planner", "llm-openai-v0.1")
-        metadata.setdefault("response_status", data.get("response_status", 200))
+        if not data["files"]:
+            raise LLMParseError("LLM response 'files' list is empty — no files were generated.")
 
-        plan = APIPlan(
-            request=str(data.get("request") or request),
-            method=str(data.get("method") or "GET").upper(),
-            path=str(data.get("path") or "/resources/{id}"),
-            entities=[str(item) for item in data.get("entities", ["Resource"])],
-            layers=[str(item) for item in data.get("layers", [])],
-            generation_allowed=bool(data.get("generation_allowed", True)),
-            reason=data.get("reason"),
-            metadata=metadata,
+    def _build_plan(self, data: Dict[str, Any]) -> APIPlan:
+        method = str(data["method"]).upper()
+        path = str(data["path"])
+        entities = list(data.get("entities", []))
+        layers = list(data.get("layers", []))
+        reason = data.get("reason")
+
+        # Normalise entities to non-empty list
+        if not entities:
+            # Derive from path: last non-parameterised segment
+            parts = [p for p in path.split("/") if p and not p.startswith("{")]
+            entities = [parts[-1].rstrip("s")] if parts else ["resource"]
+
+        return APIPlan(
+            request=data.get("request", ""),
+            method=method,
+            path=path,
+            entities=entities,
+            layers=layers,
+            generation_allowed=True,
+            reason=reason,
+            metadata={"source": "llm", **{k: v for k, v in data.items()
+                                           if k not in ("method", "path", "entities", "layers",
+                                                        "files", "reason", "request")}},
         )
 
-        generated_files = []
-
-        for item in files_data:
+    def _build_files(self, raw_files: list) -> List[GeneratedFile]:
+        files: List[GeneratedFile] = []
+        for idx, item in enumerate(raw_files):
             if not isinstance(item, dict):
-                continue
+                raise LLMParseError(f"LLM 'files[{idx}]' must be an object, got {type(item).__name__}.")
 
-            path = Path(str(item.get("path") or ""))
-            content = str(item.get("content") or "")
-
-            if not str(path):
-                raise ValueError("Generated file path is missing.")
-            if path.is_absolute():
-                raise ValueError(f"Generated path must be relative: {path}")
-            if ".." in path.parts:
-                raise ValueError(f"Generated path must not contain '..': {path}")
-            if not content.strip():
-                raise ValueError(f"Generated file content is empty: {path}")
-
-            generated_files.append(
-                GeneratedFile(
-                    path=path,
-                    content=content,
-                    action=str(item.get("action") or "create"),
+            missing = _REQUIRED_FILE_KEYS - item.keys()
+            if missing:
+                raise LLMParseError(
+                    f"LLM 'files[{idx}]' is missing required keys: {sorted(missing)}."
                 )
-            )
 
-        if not generated_files:
-            raise ValueError("LLM response did not include valid generated files.")
+            file_path = Path(str(item["path"]))
+            content = str(item["content"])
 
-        return plan, generated_files
+            # Unescape \\n sequences that some models emit
+            content = content.replace("\\n", "\n").replace("\\t", "\t")
+
+            action = str(item.get("action", "create"))
+            files.append(GeneratedFile(path=file_path, content=content, action=action))
+
+        return files

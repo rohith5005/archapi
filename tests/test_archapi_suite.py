@@ -688,6 +688,43 @@ class TestOutputSafetyGate(unittest.TestCase):
         self.assertFalse(policy.allowed)
         self.assertTrue(any("secret" in err for err in policy.errors))
 
+    def test_policy_gate_blocks_bootstrap_files(self):
+        from archapi.security.policy_gate import PolicyGate
+        from archapi.types import GeneratedFile
+
+        files = [GeneratedFile(path=Path("app/main.py"), content="app = create_app()\n")]
+        policy = PolicyGate().validate_files(files)
+
+        self.assertFalse(policy.allowed)
+        self.assertTrue(any("bootstrap" in err for err in policy.errors))
+
+    def test_policy_gate_blocks_unrequested_middleware(self):
+        from archapi.security.policy_gate import PolicyGate
+        from archapi.types import GeneratedFile, APIPlan
+
+        files = [GeneratedFile(path=Path("app/middleware/rate_limit_middleware.py"), content="x = 1\n")]
+        plan = APIPlan(
+            request="x", method="GET", path="/x", entities=[], layers=["route"],
+            generation_allowed=True,
+        )
+        policy = PolicyGate().validate_files(files, plan)
+
+        self.assertFalse(policy.allowed)
+        self.assertTrue(any("middleware" in err for err in policy.errors))
+
+    def test_policy_gate_allows_middleware_when_plan_declares_it(self):
+        from archapi.security.policy_gate import PolicyGate
+        from archapi.types import GeneratedFile, APIPlan
+
+        files = [GeneratedFile(path=Path("app/middleware/rate_limit_middleware.py"), content="x = 1\n")]
+        plan = APIPlan(
+            request="x", method="GET", path="/x", entities=[], layers=["middleware"],
+            generation_allowed=True,
+        )
+        policy = PolicyGate().validate_files(files, plan)
+
+        self.assertTrue(policy.allowed)
+
     def test_apply_rejects_absolute_and_traversal_paths(self):
         from archapi.types import GeneratedFile, GenerationResult, APIPlan, ValidationReport
 
@@ -751,6 +788,62 @@ class TestOutputSafetyGate(unittest.TestCase):
             sent_prompt = mock_provider.complete.call_args[0][0]
             self.assertNotIn("not_a_real_secret_placeholder_value", sent_prompt)
             self.assertIn("REDACTED", sent_prompt)
+
+    def test_llm_path_blocked_when_bootstrap_file_generated(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project = create_fastapi_project(Path(tmp))
+
+            mock_provider = MagicMock()
+            mock_provider.complete.return_value = json.dumps({
+                "method": "GET",
+                "path": "/users/{id}",
+                "entities": ["user"],
+                "layers": ["route"],
+                "files": [{"path": "app/main.py", "content": "app = FastAPI()\n"}],
+            })
+
+            engine = ArchAPI(str(project), use_llm=True, llm_provider=mock_provider)
+            result = engine.generate_api("Create GET API for user orders", dry_run=True)
+
+            self.assertFalse(result.validation_report.success)
+            self.assertTrue(any("bootstrap" in err for err in result.validation_report.errors))
+
+    def test_llm_path_blocks_unrequested_middleware(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project = create_fastapi_project(Path(tmp))
+
+            mock_provider = MagicMock()
+            mock_provider.complete.return_value = json.dumps({
+                "method": "GET",
+                "path": "/users/{id}",
+                "entities": ["user"],
+                "layers": ["route"],
+                "files": [{"path": "app/middleware/rate_limit_middleware.py", "content": "def limit(): pass\n"}],
+            })
+
+            engine = ArchAPI(str(project), use_llm=True, llm_provider=mock_provider)
+            result = engine.generate_api("Create GET API for user orders", dry_run=True)
+
+            self.assertFalse(result.validation_report.success)
+            self.assertTrue(any("middleware" in err for err in result.validation_report.errors))
+
+    def test_llm_path_allows_middleware_when_declared_in_plan_layers(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project = create_fastapi_project(Path(tmp))
+
+            mock_provider = MagicMock()
+            mock_provider.complete.return_value = json.dumps({
+                "method": "GET",
+                "path": "/users/{id}",
+                "entities": ["user"],
+                "layers": ["middleware"],
+                "files": [{"path": "app/middleware/rate_limit_middleware.py", "content": "def limit(): pass\n"}],
+            })
+
+            engine = ArchAPI(str(project), use_llm=True, llm_provider=mock_provider)
+            result = engine.generate_api("Create GET API for user orders", dry_run=True)
+
+            self.assertFalse(any("middleware" in err for err in result.validation_report.errors))
 
 
 if __name__ == "__main__":

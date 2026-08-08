@@ -1,53 +1,138 @@
-# LLM Usage
+# LLM Usage Guide
 
-ArchAPI supports real-time LLM-assisted API generation.
+ArchAPI v0.4.0 introduces **LLM-first API generation** — the primary generation mode
+where an LLM understands your project's architecture and generates files that match
+your existing naming conventions, folder layout, validation style, service style,
+and test style.
 
-## Provider
+## Quick Start
 
-Current provider: OpenAI Responses API
+```python
+import os
+from archapi import ArchAPI
 
-Default model: gpt-5-mini
+os.environ["OPENAI_API_KEY"] = "sk-..."   # or set in your shell
 
-## Environment variables
+engine = ArchAPI(
+    "./my_project",
+    use_llm=True,
+    llm_model="gpt-4o-mini",   # default
+)
 
-Set your OpenAI API key:
+result = engine.generate_api(
+    "Create authenticated POST API for user refund request",
+    dry_run=True,
+)
 
-    export OPENAI_API_KEY="your-real-key"
+print("Plan    :", result.plan.method, result.plan.path)
+print("Files   :", [str(f.path) for f in result.files])
+print("Diff    :", result.diff)
+```
 
-Optionally set the model:
+## Applying Generated Files
 
-    export ARCHAPI_LLM_MODEL="gpt-5-mini"
+```python
+result = engine.generate_api(
+    "Create authenticated POST API for user refund request",
+    dry_run=False,   # writes files to disk
+)
+```
 
-## Python usage
+ArchAPI will **refuse to overwrite** existing files — it will raise `FileExistsError`
+rather than silently clobbering your work.
 
-    from archapi import ArchAPI
+## API Key Resolution
 
-    engine = ArchAPI(
-        "./my_backend_project",
-        use_llm=True,
-        llm_model="gpt-5-mini",
-    )
+The OpenAI API key is resolved in this order:
 
-    result = engine.generate_api(
-        "Create authenticated POST API for user refund request",
-        dry_run=True,
-    )
+1. `api_key=` constructor argument
+2. `OPENAI_API_KEY` environment variable
 
-    print(result.plan)
-    print(result.validation_report)
-    print(result.diff)
+```python
+engine = ArchAPI(
+    "./my_project",
+    use_llm=True,
+    api_key="sk-...",  # explicit, useful in CI
+)
+```
 
-## Smoke test
+## Model Selection
 
-    export OPENAI_API_KEY="your-real-key"
-    ./scripts/test_openai_llm.sh
+The default model is `gpt-4o-mini` (fast, cheap, sufficient for structured JSON generation).
+Switch to a more capable model for complex projects:
 
-## Safety
+```python
+engine = ArchAPI(
+    "./my_project",
+    use_llm=True,
+    llm_model="gpt-4o",
+)
+```
 
-Even with LLM generation enabled, ArchAPI still runs:
+## Installation
 
-- architecture confidence checks
-- generated-code validation
-- policy checks
-- dry-run generation by default
-- overwrite protection
+The `openai` package is an **optional dependency**:
+
+```bash
+pip install archapi[openai]
+```
+
+If you omit `[openai]`, ArchAPI will still work in deterministic mode
+(`use_llm=False`, which is the default).
+
+## Supported Frameworks (v0.4.0)
+
+| Framework | LLM mode | Deterministic mode |
+|---|---|---|
+| Express TypeScript | ✅ | ✅ |
+| FastAPI | ✅ | ✅ |
+| Flask | ✅ | ✅ |
+| NestJS | ✅ | ✅ |
+| Django REST Framework | ✅ | ✅ |
+
+## Custom LLM Provider
+
+You can pass your own provider (e.g. Anthropic, Gemini, local Ollama) by
+implementing `archapi.llm.LLMProvider` and passing it in:
+
+```python
+from archapi.llm import LLMProvider
+
+class MyProvider(LLMProvider):
+    @property
+    def model_name(self) -> str:
+        return "my-local-model"
+
+    def complete(self, prompt: str) -> str:
+        # call your model here
+        return raw_json_string
+
+engine = ArchAPI(
+    "./my_project",
+    use_llm=True,
+    llm_provider=MyProvider(),
+)
+```
+
+## How the Prompt is Built
+
+ArchAPI sends the LLM:
+
+1. **Framework + genome** — detected route/service/schema/test styles
+2. **Real code snippets** — the most relevant existing files from your project
+3. **Your request** — the natural language description of the API to generate
+4. **JSON output schema** — strict instruction to respond with structured JSON only
+
+The LLM response is then parsed, validated through the policy gate, secret-scanned,
+and architecture-scored before being returned to you.
+
+## Fallback: Deterministic Mode
+
+If you prefer the original rule-based generation:
+
+```python
+engine = ArchAPI("./my_project")   # use_llm defaults to False
+result = engine.generate_api("Create GET API for user orders", dry_run=True)
+```
+
+The deterministic path remains unchanged and does not require `openai`.

@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 from archapi.security.secret_scanner import SecretScanner
-from archapi.types import GeneratedFile, GenerationResult
+from archapi.types import APIPlan, GeneratedFile, GenerationResult
 
 
 @dataclass
@@ -54,6 +54,26 @@ class PolicyGate:
         "Makefile",
     }
 
+    # Application entry-point/bootstrap files ArchAPI must never create — it
+    # only generates new API layer code (routes/controllers/services/etc.),
+    # never scaffolds or rewrites how the app starts up.
+    BLOCKED_BOOTSTRAP_FILENAMES = {
+        "main.py",
+        "app.py",
+        "asgi.py",
+        "wsgi.py",
+        "settings.py",
+        "manage.py",
+        "main.ts",
+        "main.js",
+        "app.ts",
+        "app.js",
+        "server.ts",
+        "server.js",
+        "index.ts",
+        "index.js",
+    }
+
     BLOCKED_PATH_PARTS = {
         ".git",
         ".venv",
@@ -76,10 +96,15 @@ class PolicyGate:
         "jwt.secret",
     }
 
-    def validate_files(self, files: List[GeneratedFile]) -> PolicyReport:
+    def validate_files(
+        self,
+        files: List[GeneratedFile],
+        plan: Optional[APIPlan] = None,
+    ) -> PolicyReport:
         errors: List[str] = []
         warnings: List[str] = []
         seen_paths = set()
+        declared_layers = {layer.lower() for layer in (plan.layers if plan else [])}
 
         for generated in files:
             path = Path(generated.path)
@@ -98,6 +123,9 @@ class PolicyGate:
                     f"Policy blocked write to dependency/config file without explicit authorization: {path}"
                 )
 
+            if path.name in self.BLOCKED_BOOTSTRAP_FILENAMES:
+                errors.append(f"Policy blocked write to application bootstrap file: {path}")
+
             if parts & self.BLOCKED_PATH_PARTS:
                 errors.append(f"Policy blocked write inside protected path: {path}")
 
@@ -110,6 +138,12 @@ class PolicyGate:
             seen_paths.add(key)
 
             lowered = str(path).lower()
+
+            if ("middleware" in lowered or "permission" in lowered) and "middleware" not in declared_layers:
+                errors.append(
+                    f"Policy blocked unrequested middleware file (not declared in plan layers): {path}"
+                )
+
             for keyword in self.SENSITIVE_KEYWORDS:
                 if keyword in lowered:
                     warnings.append(f"Generated patch touches sensitive area '{keyword}': {path}")
@@ -123,4 +157,4 @@ class PolicyGate:
         return PolicyReport(allowed=len(errors) == 0, errors=errors, warnings=warnings)
 
     def validate_result(self, result: GenerationResult) -> PolicyReport:
-        return self.validate_files(result.files)
+        return self.validate_files(result.files, result.plan)

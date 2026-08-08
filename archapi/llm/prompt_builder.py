@@ -1,206 +1,198 @@
 from __future__ import annotations
 
-import json
+import textwrap
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Optional
 
-from archapi.types import APIGenome
+from archapi.types import APIGenome, ScanResult
 
 
-class LLMPromptBuilder:
-    """Builds architecture-aware prompts for LLM API generation."""
+# Maximum characters to include from any single example file
+_MAX_FILE_SNIPPET = 1500
 
-    def __init__(self, max_files: int = 10, max_chars_per_file: int = 2500) -> None:
-        self.max_files = max_files
-        self.max_chars_per_file = max_chars_per_file
+# Maximum total prompt size (rough guard — real token counting not done here)
+_MAX_PROMPT_CHARS = 14_000
 
-    def build_generation_prompt(
+# Per-framework file-naming conventions that ArchAPI's own post-generation
+# validator enforces — telling the model up front avoids generating
+# architecturally-correct code that still fails the structural check.
+_REQUIRED_LAYER_HINTS = {
+    "fastapi": (
+        "route files must end in `_router.py`, services in `_service.py`, "
+        "schemas in `_schema.py`, and include a test file under `tests/` starting with `test_`"
+    ),
+    "flask": (
+        "route files must end in `_routes.py`, services in `_service.py`, "
+        "schemas in `_schema.py`, and include a test file under `tests/` starting with `test_`"
+    ),
+    "django-drf": (
+        "include files named exactly `views.py`, `serializers.py`, and `urls.py`, "
+        "plus a test file with `test_` in its name"
+    ),
+    "nestjs": (
+        "include files ending in `.controller.ts`, `.service.ts`, `.module.ts`, and `.dto.ts`, "
+        "plus a `.spec.ts` test file"
+    ),
+    "express-typescript": (
+        "include files under paths containing `routes`, `controllers`, `services`, `schemas`, and `tests`"
+    ),
+}
+
+
+class PromptBuilder:
+    """
+    Builds an architecture-aware LLM prompt that includes:
+
+    - The detected framework and genome (naming / style conventions)
+    - Relevant code snippets from the scanned project
+    - The user's natural-language API request
+    - A strict JSON output schema instruction
+    """
+
+    def build(
         self,
         request: str,
         genome: APIGenome,
-        maps: Dict[str, Any],
-        project_path: Path,
+        scan: Optional[ScanResult] = None,
     ) -> str:
-        architecture = {
-            "framework": genome.framework,
-            "route_style": genome.route_style,
-            "controller_style": genome.controller_style,
-            "service_style": genome.service_style,
-            "model_style": genome.model_style,
-            "schema_style": genome.schema_style,
-            "auth_style": genome.auth_style,
-            "error_style": genome.error_style,
-            "test_style": genome.test_style,
-            "confidence": genome.confidence,
-            "metadata": genome.metadata,
-        }
+        sections: list[str] = []
 
-        file_context = self._collect_file_context(maps, project_path)
+        sections.append(self._header())
+        sections.append(self._genome_section(genome))
 
-        required_json = {
-            "plan": {
-                "request": request,
-                "method": "GET|POST|PUT|PATCH|DELETE",
-                "path": "/resources/{id}",
-                "entities": ["Resource"],
-                "layers": ["route", "controller", "service", "schema", "test"],
-                "generation_allowed": True,
-                "reason": None,
-                "metadata": {
-                    "planner": "llm-openai-v0.1",
-                    "resource": "Resource",
-                    "action": "custom",
-                    "response_status": 200,
-                },
-            },
-            "files": [
-                {
-                    "path": "relative/path/to/generated_file",
-                    "content": "complete file content",
-                }
-            ],
-        }
+        if scan is not None:
+            sections.append(self._project_context_section(scan, genome))
 
-        return f"""
-Generate REST API code for ArchAPI.
+        sections.append(self._request_section(request))
+        sections.append(self._output_schema_section(genome))
 
-User request:
-{request}
+        prompt = "\n\n".join(s for s in sections if s.strip())
 
-Detected project architecture:
-{json.dumps(architecture, indent=2)}
+        # Safety: truncate if exceeds guard limit
+        if len(prompt) > _MAX_PROMPT_CHARS:
+            prompt = prompt[:_MAX_PROMPT_CHARS] + "\n\n[...project context truncated for token limit...]"
 
-Relevant existing files:
-{json.dumps(file_context, indent=2)}
+        return prompt
 
-Rules:
-1. Return only valid JSON.
-2. Do not use markdown fences.
-3. Generate complete file contents.
-4. Use relative paths only.
-5. Match the detected framework and existing project style.
-6. Do not create .env files, private keys, cache files, .git files, dependency folders, or secrets.
-7. Keep unknown business logic as safe TODO placeholders.
-8. Express TypeScript should normally include route, controller, service, schema, and test.
-9. FastAPI should normally include router, service, schema, and test.
+    # ------------------------------------------------------------------
+    # Private section builders
+    # ------------------------------------------------------------------
 
-Required JSON shape:
-{json.dumps(required_json, indent=2)}
-""".strip()
+    def _header(self) -> str:
+        return textwrap.dedent("""\
+            You are ArchAPI — an expert API engineer that generates production-quality
+            REST API code. Your task is to generate new API files that EXACTLY match
+            the architecture, naming conventions, folder structure, validation style,
+            service pattern, and test style of the existing project shown below.
 
-    def _collect_file_context(
-        self,
-        maps: Dict[str, Any],
-        project_path: Path,
-    ) -> List[Dict[str, str]]:
-        file_paths: List[Path] = []
+            Do NOT introduce new patterns or libraries that are not already present in
+            the project. Match what exists as closely as possible.
+        """)
 
-        for key in [
-            "route_map",
-            "controller_map",
-            "service_map",
-            "schema_map",
-            "model_map",
-            "middleware_map",
-            "test_map",
-        ]:
-            value = maps.get(key, {})
-            if isinstance(value, dict):
-                for candidate in value.values():
-                    file_paths.append(Path(candidate))
+    def _genome_section(self, genome: APIGenome) -> str:
+        lines = [
+            "## Detected Project Architecture (Genome)",
+            "",
+            f"- Framework       : {genome.framework}",
+            f"- Route style     : {genome.route_style}",
+            f"- Controller style: {genome.controller_style}",
+            f"- Service style   : {genome.service_style}",
+            f"- Schema style    : {genome.schema_style}",
+            f"- Test style      : {genome.test_style}",
+            f"- Auth style      : {genome.auth_style}",
+            f"- Confidence      : {genome.confidence}",
+        ]
 
-        context: List[Dict[str, str]] = []
-        seen = set()
+        if genome.metadata:
+            lang = genome.metadata.get("language")
+            if lang:
+                lines.append(f"- Language        : {lang}")
 
-        for path in file_paths:
-            resolved = path.resolve()
+        return "\n".join(lines)
 
-            if resolved in seen:
-                continue
+    def _project_context_section(self, scan: ScanResult, genome: APIGenome) -> str:
+        """Include the most relevant existing code snippets as architecture examples."""
+        snippets: list[str] = []
+        budget = _MAX_PROMPT_CHARS // 2  # dedicate half the budget to examples
 
-            if not resolved.exists() or not resolved.is_file():
-                continue
+        # Priority order: routes > services > schemas > tests > controllers
+        priority_lists = [
+            ("Route example", scan.routes),
+            ("Service example", scan.services),
+            ("Schema example", scan.schemas),
+            ("Test example", scan.tests),
+            ("Controller example", scan.controllers),
+            ("Middleware example", scan.middleware),
+        ]
 
-            seen.add(resolved)
-
-            try:
-                rel = resolved.relative_to(project_path)
-            except ValueError:
-                rel = resolved.name
-
-            text = resolved.read_text(encoding="utf-8", errors="ignore")
-            if len(text) > self.max_chars_per_file:
-                text = text[: self.max_chars_per_file] + "\n... truncated ..."
-
-            context.append({"path": str(rel), "content": text})
-
-            if len(context) >= self.max_files:
+        for label, paths in priority_lists:
+            if not paths or budget <= 0:
                 break
+            path = paths[0]
+            snippet = self._read_snippet(path, genome.framework)
+            if snippet:
+                block = f"### {label}: `{path.name}`\n```\n{snippet}\n```"
+                snippets.append(block)
+                budget -= len(block)
 
-        return context
+        if not snippets:
+            return ""
 
-# Backward-compatible name used by core.py and tests.
-class PromptBuilder(LLMPromptBuilder):
-    def build(self, request, genome, maps, project_path):
-        return self.build_generation_prompt(
-            request=request,
-            genome=genome,
-            maps=maps,
-            project_path=project_path,
-        )
+        return "## Existing Project Code Examples\n\n" + "\n\n".join(snippets)
 
-# Compatibility wrapper used by existing core.py and tests.
-class PromptBuilder(LLMPromptBuilder):
-    def build(self, request, genome, scan_or_maps=None, project_path=None):
-        from pathlib import Path
+    def _request_section(self, request: str) -> str:
+        return f"## API Generation Request\n\n{request}"
 
-        maps = {}
+    def _output_schema_section(self, genome: APIGenome) -> str:
+        schema = textwrap.dedent("""\
+            ## Required JSON Output Format
 
-        if scan_or_maps is not None:
-            if isinstance(scan_or_maps, dict):
-                maps = scan_or_maps
-            else:
-                # Convert ScanResult-style object into the map shape expected by LLMPromptBuilder.
-                maps = {
-                    "route_map": {
-                        str(i): str(path)
-                        for i, path in enumerate(getattr(scan_or_maps, "routes", []) or [])
-                    },
-                    "controller_map": {
-                        str(i): str(path)
-                        for i, path in enumerate(getattr(scan_or_maps, "controllers", []) or [])
-                    },
-                    "service_map": {
-                        str(i): str(path)
-                        for i, path in enumerate(getattr(scan_or_maps, "services", []) or [])
-                    },
-                    "schema_map": {
-                        str(i): str(path)
-                        for i, path in enumerate(getattr(scan_or_maps, "schemas", []) or [])
-                    },
-                    "model_map": {
-                        str(i): str(path)
-                        for i, path in enumerate(getattr(scan_or_maps, "models", []) or [])
-                    },
-                    "middleware_map": {
-                        str(i): str(path)
-                        for i, path in enumerate(getattr(scan_or_maps, "middleware", []) or [])
-                    },
-                    "test_map": {
-                        str(i): str(path)
-                        for i, path in enumerate(getattr(scan_or_maps, "tests", []) or [])
-                    },
+            Respond with ONLY valid JSON — no markdown fences, no commentary.
+            The JSON must conform exactly to this schema:
+
+            {
+              "method": "<HTTP method: GET | POST | PUT | PATCH | DELETE>",
+              "path": "<REST path, using {param} for path parameters>",
+              "entities": ["<primary entity name>"],
+              "layers": ["<layer names that will be generated>"],
+              "files": [
+                {
+                  "path": "<relative file path from project root>",
+                  "content": "<full file content as a string — escape newlines as \\\\n>"
                 }
+              ],
+              "reason": "<optional short explanation of decisions made>"
+            }
 
-                if project_path is None:
-                    project_path = getattr(scan_or_maps, "project_path", None)
+            Rules:
+        """)
 
-        if project_path is None:
-            project_path = Path(".")
+        rules = [
+            f"- Generate files for framework: {genome.framework}",
+            "- Match the exact naming conventions, imports, and patterns seen above",
+            "- Every generated file must be complete and immediately usable",
+            "- Use {param} placeholders in paths (e.g. /users/{user_id}/orders)",
+            "- Do not create new application entry-point or bootstrap files "
+            "(e.g. main.py, app.py, settings.py, wsgi.py, asgi.py, index.ts, server.ts) "
+            "— only generate the requested API layer files",
+            "- If you generate a new middleware/auth-guard file, include \"middleware\" in \"layers\"",
+            "- Do not output anything outside the JSON object",
+        ]
 
-        return self.build_generation_prompt(
-            request=request,
-            genome=genome,
-            maps=maps,
-            project_path=Path(project_path),
-        )
+        layer_hint = _REQUIRED_LAYER_HINTS.get(genome.framework)
+        if layer_hint:
+            rules.insert(1, f"- Required file naming for this framework: {layer_hint}")
+
+        return schema + "\n".join(rules) + "\n"
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    def _read_snippet(self, path: Path, framework: str) -> str:
+        """Read up to _MAX_FILE_SNIPPET characters from a source file."""
+        try:
+            text = path.read_text(encoding="utf-8", errors="ignore")
+            return text[:_MAX_FILE_SNIPPET] + ("..." if len(text) > _MAX_FILE_SNIPPET else "")
+        except OSError:
+            return ""
