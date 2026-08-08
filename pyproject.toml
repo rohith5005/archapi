@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "archapi"
-version = "0.4.0"
+version = "0.5.0"
 description = "Architecture-preserving REST API synthesis library"
 readme = "README.md"
 license = "MIT"
