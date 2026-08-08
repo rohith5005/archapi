@@ -13,6 +13,31 @@ _MAX_FILE_SNIPPET = 1500
 # Maximum total prompt size (rough guard — real token counting not done here)
 _MAX_PROMPT_CHARS = 14_000
 
+# Per-framework file-naming conventions that ArchAPI's own post-generation
+# validator enforces — telling the model up front avoids generating
+# architecturally-correct code that still fails the structural check.
+_REQUIRED_LAYER_HINTS = {
+    "fastapi": (
+        "route files must end in `_router.py`, services in `_service.py`, "
+        "schemas in `_schema.py`, and include a test file under `tests/` starting with `test_`"
+    ),
+    "flask": (
+        "route files must end in `_routes.py`, services in `_service.py`, "
+        "schemas in `_schema.py`, and include a test file under `tests/` starting with `test_`"
+    ),
+    "django-drf": (
+        "include files named exactly `views.py`, `serializers.py`, and `urls.py`, "
+        "plus a test file with `test_` in its name"
+    ),
+    "nestjs": (
+        "include files ending in `.controller.ts`, `.service.ts`, `.module.ts`, and `.dto.ts`, "
+        "plus a `.spec.ts` test file"
+    ),
+    "express-typescript": (
+        "include files under paths containing `routes`, `controllers`, `services`, `schemas`, and `tests`"
+    ),
+}
+
 
 class PromptBuilder:
     """
@@ -119,33 +144,46 @@ class PromptBuilder:
         return f"## API Generation Request\n\n{request}"
 
     def _output_schema_section(self, genome: APIGenome) -> str:
-        return textwrap.dedent(f"""\
+        schema = textwrap.dedent("""\
             ## Required JSON Output Format
 
             Respond with ONLY valid JSON — no markdown fences, no commentary.
             The JSON must conform exactly to this schema:
 
-            {{
+            {
               "method": "<HTTP method: GET | POST | PUT | PATCH | DELETE>",
-              "path": "<REST path, using {{param}} for path parameters>",
+              "path": "<REST path, using {param} for path parameters>",
               "entities": ["<primary entity name>"],
               "layers": ["<layer names that will be generated>"],
               "files": [
-                {{
+                {
                   "path": "<relative file path from project root>",
                   "content": "<full file content as a string — escape newlines as \\\\n>"
-                }}
+                }
               ],
               "reason": "<optional short explanation of decisions made>"
-            }}
+            }
 
             Rules:
-            - Generate files for framework: {genome.framework}
-            - Match the exact naming conventions, imports, and patterns seen above
-            - Every generated file must be complete and immediately usable
-            - Use {{param}} placeholders in paths (e.g. /users/{{user_id}}/orders)
-            - Do not output anything outside the JSON object
         """)
+
+        rules = [
+            f"- Generate files for framework: {genome.framework}",
+            "- Match the exact naming conventions, imports, and patterns seen above",
+            "- Every generated file must be complete and immediately usable",
+            "- Use {param} placeholders in paths (e.g. /users/{user_id}/orders)",
+            "- Do not create new application entry-point or bootstrap files "
+            "(e.g. main.py, app.py, settings.py, wsgi.py, asgi.py, index.ts, server.ts) "
+            "— only generate the requested API layer files",
+            "- If you generate a new middleware/auth-guard file, include \"middleware\" in \"layers\"",
+            "- Do not output anything outside the JSON object",
+        ]
+
+        layer_hint = _REQUIRED_LAYER_HINTS.get(genome.framework)
+        if layer_hint:
+            rules.insert(1, f"- Required file naming for this framework: {layer_hint}")
+
+        return schema + "\n".join(rules) + "\n"
 
     # ------------------------------------------------------------------
     # Helpers
