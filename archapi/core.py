@@ -23,6 +23,11 @@ from archapi.types import (
 )
 
 
+def _emit(message: str) -> None:
+    # No-op progress hook; kept as a call site for a future progress callback.
+    pass
+
+
 class ArchAPI:
     def __init__(
         self,
@@ -318,6 +323,11 @@ class ArchAPI:
         _emit("validating output")
         report = adapter.validate_generated_code(files, plan, genome)
 
+        policy = self._policy_gate.validate_files(files)
+        report.errors.extend(policy.errors)
+        report.warnings.extend(policy.warnings)
+        report.success = report.success and policy.allowed
+
         result = GenerationResult(
             project_path=self.project_path,
             plan=plan,
@@ -349,6 +359,7 @@ class ArchAPI:
         llm = self._resolve_llm()
 
         prompt = PromptBuilder().build(request, genome, scan)
+        prompt = self._context_redactor.redact(prompt)
 
         try:
             raw_response = llm.complete(prompt)

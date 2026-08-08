@@ -11,7 +11,7 @@ and test style.
 import os
 from archapi import ArchAPI
 
-os.environ["OPENAI_API_KEY"] = "sk-...***REMOVED-EXPOSED-KEY***"   # or set in your shell
+os.environ["OPENAI_API_KEY"] = "sk-..."   # or set in your shell
 
 engine = ArchAPI(
     "./my_project",
