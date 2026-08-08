@@ -6,12 +6,15 @@ It scans an existing backend project, detects the framework, understands the pro
 
 ## Current Status
 
-Current checkpoint: **0.3.1**
+Current checkpoint: **0.5.0**
 
 ArchAPI currently supports:
 
 - Express TypeScript
 - FastAPI
+- Flask
+- Django REST Framework
+- NestJS
 - Generic fallback detection for unsupported projects
 
 Core features:
@@ -27,9 +30,13 @@ Core features:
 - Safe apply behavior
 - Overwrite protection
 - Cache and changed-file detection
+- Command-line interface (`archapi detect|scan|plan|generate`)
+- LLM-first generation mode (optional, OpenAI-backed)
 - Secret scanning helpers
-- Context redaction
-- Policy gate
+- Context redaction before any LLM call
+- Output safety policy gate (path traversal, absolute paths, protected
+  directories, bootstrap/config files, unrequested middleware, secret-shaped
+  content)
 - Architecture consistency scoring
 - Unified regression test suite
 
@@ -37,6 +44,12 @@ Core features:
 
 ```bash
 python -m pip install archapi
+```
+
+To use LLM-first generation mode, install the optional `openai` extra:
+
+```bash
+python -m pip install "archapi[openai]"
 ```
 
 Verify:
@@ -80,7 +93,7 @@ Or:
 Expected result:
 
 ```text
-Ran 7 tests
+Ran 32 tests
 
 OK
 ```
@@ -101,6 +114,45 @@ print(result.plan)
 print(result.validation_report)
 print(result.diff)
 ```
+
+## Command-Line Interface
+
+```bash
+archapi detect ./sample_projects/express_basic
+archapi scan ./sample_projects/express_basic
+archapi plan ./sample_projects/express_basic "Create GET API for user order history"
+archapi generate ./sample_projects/express_basic "Create GET API for user order history"
+
+# Write files to disk instead of a dry run
+archapi generate ./sample_projects/express_basic "Create GET API for user order history" --apply
+```
+
+## LLM-First Generation (optional)
+
+With the `openai` extra installed and `OPENAI_API_KEY` set, ArchAPI can use an
+LLM to generate architecture-matching code instead of the deterministic
+templates. See [LLM Usage Guide](docs/LLM_USAGE.md) for the full walkthrough.
+
+```python
+from archapi import ArchAPI
+
+engine = ArchAPI(
+    "./sample_projects/express_basic",
+    use_llm=True,
+    llm_model="gpt-4o-mini",
+)
+
+result = engine.generate_api(
+    "Create authenticated POST API for user refund request",
+    dry_run=True,
+)
+
+print(result.plan)
+print(result.validation_report)
+```
+
+Deterministic generation (`use_llm=False`, the default) does not require the
+`openai` package and works fully offline.
 
 ## Express TypeScript Example
 
@@ -219,7 +271,13 @@ Generated path: /products/{product_id}/reviews
 - [Architecture](docs/ARCHITECTURE.md)
 - [File Guide](docs/FILE_GUIDE.md)
 - [Security Measures](docs/SECURITY_MEASURES.md)
+- [LLM Usage Guide](docs/LLM_USAGE.md)
 - [Development Status](docs/DEVELOPMENT_STATUS.md)
+
+## Contributors
+
+- [Rohith Chikkala](https://github.com/rohith5005)
+- [Praneeth Koppolu](https://github.com/iampraneethk)
 
 ## Links
 
