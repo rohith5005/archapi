@@ -10,7 +10,8 @@ readme = "README.md"
 license = "MIT"
 requires-python = ">=3.9"
 authors = [
-  { name = "Rohith Chikkala" }
+  { name = "Rohith Chikkala" },
+  { name = "Praneeth Koppolu" }
 ]
 dependencies = []
 keywords = ["rest-api", "code-generation", "architecture", "express", "fastapi"]
