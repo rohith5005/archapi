@@ -93,8 +93,25 @@ class GenerationResult:
                 + "; ".join(self.validation_report.errors)
             )
 
+        project_root = self.project_path.resolve()
+
         for generated in self.files:
-            target = self.project_path / generated.path
+            raw_path = Path(generated.path)
+
+            if raw_path.is_absolute():
+                raise PermissionError(
+                    f"Refusing to write to an absolute path: {raw_path}"
+                )
+
+            target = (project_root / raw_path).resolve()
+
+            # Last line of defense against path traversal, independent of
+            # whatever validation ran upstream.
+            if not target.is_relative_to(project_root):
+                raise PermissionError(
+                    f"Refusing to write outside the project directory: {generated.path}"
+                )
+
             target.parent.mkdir(parents=True, exist_ok=True)
 
             if target.exists() and generated.action == "create":

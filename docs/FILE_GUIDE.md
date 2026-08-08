@@ -39,7 +39,6 @@
 ## Validation
 
 - `archapi/validation/architecture_score.py`: architecture scoring
-- `archapi/validation/basic_validators.py`: generated-file validation
 - `archapi/validation/command_validator.py`: optional command validation
 
 ## Tests

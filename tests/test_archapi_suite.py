@@ -632,5 +632,126 @@ class TestLLMLayer(unittest.TestCase):
             self.assertTrue(result.validation_report.success)
 
 
+# ===========================================================================
+# Output safety gate (Phase 6)
+# ===========================================================================
+
+class TestOutputSafetyGate(unittest.TestCase):
+    def _llm_response_with_path(self, bad_path: str) -> str:
+        return json.dumps({
+            "method": "POST",
+            "path": "/products/{product_id}/reviews",
+            "entities": ["review"],
+            "layers": ["route"],
+            "files": [
+                {"path": bad_path, "content": "print('hello')\n"},
+            ],
+        })
+
+    def test_policy_gate_blocks_absolute_and_traversal_paths(self):
+        from archapi.security.policy_gate import PolicyGate
+        from archapi.types import GeneratedFile
+
+        files = [
+            GeneratedFile(path=Path("/etc/passwd"), content="x = 1\n"),
+            GeneratedFile(path=Path("../../outside.py"), content="x = 1\n"),
+        ]
+
+        policy = PolicyGate().validate_files(files)
+
+        self.assertFalse(policy.allowed)
+        self.assertTrue(any("absolute" in err for err in policy.errors))
+        self.assertTrue(any("traversal" in err for err in policy.errors))
+
+    def test_policy_gate_blocks_dependency_config_files(self):
+        from archapi.security.policy_gate import PolicyGate
+        from archapi.types import GeneratedFile
+
+        files = [GeneratedFile(path=Path("package.json"), content="{}\n")]
+        policy = PolicyGate().validate_files(files)
+
+        self.assertFalse(policy.allowed)
+        self.assertTrue(any("dependency/config" in err for err in policy.errors))
+
+    def test_policy_gate_blocks_generated_secret(self):
+        from archapi.security.policy_gate import PolicyGate
+        from archapi.types import GeneratedFile
+
+        files = [
+            GeneratedFile(
+                path=Path("app/services/leak_service.py"),
+                content='API_KEY = "abcdef1234567890abcdef"\n',
+            )
+        ]
+        policy = PolicyGate().validate_files(files)
+
+        self.assertFalse(policy.allowed)
+        self.assertTrue(any("secret" in err for err in policy.errors))
+
+    def test_apply_rejects_absolute_and_traversal_paths(self):
+        from archapi.types import GeneratedFile, GenerationResult, APIPlan, ValidationReport
+
+        with tempfile.TemporaryDirectory() as tmp:
+            project = create_fastapi_project(Path(tmp))
+
+            plan = APIPlan(
+                request="x", method="GET", path="/x", entities=[], layers=[],
+                generation_allowed=True,
+            )
+
+            for bad_path in [Path("/etc/archapi_test_should_not_write.txt"), Path("../outside.txt")]:
+                result = GenerationResult(
+                    project_path=project,
+                    plan=plan,
+                    files=[GeneratedFile(path=bad_path, content="x\n")],
+                    # Simulates a bypassed/buggy upstream validator — apply()
+                    # must still refuse to write outside the project.
+                    validation_report=ValidationReport(success=True),
+                )
+                with self.assertRaises(PermissionError):
+                    result.apply()
+
+    def test_llm_path_blocked_when_generated_file_is_absolute(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project = create_fastapi_project(Path(tmp))
+
+            mock_provider = MagicMock()
+            mock_provider.complete.return_value = self._llm_response_with_path("/etc/passwd")
+
+            engine = ArchAPI(str(project), use_llm=True, llm_provider=mock_provider)
+            result = engine.generate_api("Create POST API for product review", dry_run=False)
+
+            self.assertFalse(result.validation_report.success)
+            self.assertTrue(any("absolute" in err for err in result.validation_report.errors))
+
+    def test_llm_prompt_redacts_secrets_from_scanned_source(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project = create_fastapi_project(Path(tmp))
+            # Remove the empty __init__.py so it can't be picked as the
+            # "route example" ahead of the file we're about to plant a secret in.
+            (project / "app/routers/__init__.py").unlink()
+            (project / "app/routers/user_router.py").write_text(
+                "from fastapi import APIRouter\n\n"
+                'SOME_API_KEY = "not_a_real_secret_placeholder_value"\n\n'
+                "router = APIRouter()\n"
+            )
+
+            mock_provider = MagicMock()
+            mock_provider.complete.return_value = json.dumps({
+                "method": "GET",
+                "path": "/users/{id}",
+                "entities": ["user"],
+                "layers": ["route"],
+                "files": [{"path": "app/routers/x.py", "content": "x = 1\n"}],
+            })
+
+            engine = ArchAPI(str(project), use_llm=True, llm_provider=mock_provider)
+            engine.generate_api("Create GET API for user orders", dry_run=True)
+
+            sent_prompt = mock_provider.complete.call_args[0][0]
+            self.assertNotIn("not_a_real_secret_placeholder_value", sent_prompt)
+            self.assertIn("REDACTED", sent_prompt)
+
+
 if __name__ == "__main__":
     unittest.main()
