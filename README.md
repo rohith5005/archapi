@@ -123,9 +123,51 @@ archapi scan ./sample_projects/express_basic
 archapi plan ./sample_projects/express_basic "Create GET API for user order history"
 archapi generate ./sample_projects/express_basic "Create GET API for user order history"
 
-# Write files to disk instead of a dry run
-archapi generate ./sample_projects/express_basic "Create GET API for user order history" --apply
+# Architecture-aware LLM generation instead of deterministic templates
+archapi generate ./sample_projects/express_basic "Create GET API for user order history" --llm
+
+# Write files to disk instead of a dry run -- always opt-in, always explicit
+archapi generate ./sample_projects/express_basic "Create GET API for user order history" --llm --apply
+
+# Machine-readable output for CI/tooling (any command)
+archapi generate ./sample_projects/express_basic "Create GET API for user order history" --json
 ```
+
+`generate` is a dry-run preview by default; nothing is written to disk unless
+`--apply` is passed. Exit codes are stable and documented: `0` success, `1`
+generation/validation rejected, `2` invalid CLI usage or configuration, `3`
+LLM provider failure. Pass `--debug` for full tracebacks on unexpected
+errors; without it, errors are concise and never include credentials.
+
+### Configuration
+
+Settings resolve with precedence: explicit CLI flag > project `archapi.toml`
+> environment variable > built-in default. Optional project-local
+`archapi.toml`:
+
+```toml
+[archapi]
+use_llm = true
+strict_validation = false
+
+[archapi.llm]
+provider = "openai"
+model = "gpt-4o-mini"
+
+[archapi.retrieval]
+max_chars = 12000
+routes = 2
+services = 2
+schemas = 2
+tests = 2
+```
+
+API keys are never read from `archapi.toml` (ArchAPI refuses to load a
+config file containing a key-, secret-, token-, password-, or
+credential-like key) -- only from the `OPENAI_API_KEY` environment
+variable. Equivalent environment variables exist for every field (e.g.
+`ARCHAPI_USE_LLM`, `ARCHAPI_LLM_MODEL`, `ARCHAPI_ROUTES_LIMIT`) -- see
+`archapi/config.py`.
 
 ## LLM-First Generation (optional)
 

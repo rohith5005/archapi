@@ -75,6 +75,11 @@ class GenerationResult:
     files: List[GeneratedFile]
     validation_report: ValidationReport
     warnings: List[str] = field(default_factory=list)
+    # Captured separately (Phase 8C) from validation_report.success, which
+    # is the two merged together -- lets callers (e.g. the CLI) show which
+    # specific gate a rejection came from.
+    policy_gate_pass: bool = True
+    framework_validation_pass: bool = True
 
     @property
     def diff(self) -> str:

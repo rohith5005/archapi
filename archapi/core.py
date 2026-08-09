@@ -4,6 +4,7 @@ import asyncio
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
+from archapi.config import ArchAPIConfig, ArchAPIConfigError
 from archapi.frameworks.detector import FrameworkDetector
 from archapi.frameworks.registry import FrameworkRegistry
 from archapi.indexing.cache import CacheManager
@@ -35,18 +36,33 @@ class ArchAPI:
         framework: Optional[str] = None,
         config: Optional[Dict[str, Any]] = None,
         use_llm: bool = False,
-        llm_model: str = "gpt-4o-mini",
+        llm_model: Optional[str] = None,
         llm_provider=None,
         api_key: Optional[str] = None,
+        settings: Optional[ArchAPIConfig] = None,
     ):
+        """
+        :param config: Architecture hints (route_dir/service_dir/...) for
+            "strict config mode" scanning. Predates and is unrelated to
+            `settings` below -- kept as its own parameter so existing
+            callers are unaffected.
+        :param settings: Central ArchAPIConfig (Phase 8C) -- LLM
+            provider/model, retrieval budget, strict_validation. Defaults
+            to ArchAPIConfig() (safe, use_llm=False). `use_llm=True` or an
+            explicit `llm_model=` passed directly here always takes
+            precedence over `settings`, for full backward compatibility
+            with existing direct-construction callers that never touch
+            ArchAPIConfig at all.
+        """
         self.project_path = Path(project_path).resolve()
         if not self.project_path.exists():
             raise FileNotFoundError(f"Project path does not exist: {self.project_path}")
 
         self._framework_override = framework
         self._config = config or {}
-        self._use_llm = use_llm
-        self._llm_model = llm_model
+        self._settings = settings or ArchAPIConfig()
+        self._use_llm = bool(use_llm) or self._settings.use_llm
+        self._llm_model = llm_model or self._settings.llm_model
         self._api_key = api_key
         self._detector = FrameworkDetector()
         self._registry = FrameworkRegistry()
@@ -181,6 +197,10 @@ class ArchAPI:
 
     def config(self) -> Dict[str, Any]:
         return dict(self._config)
+
+    def settings(self) -> ArchAPIConfig:
+        """The resolved ArchAPIConfig (Phase 8C) this instance is using."""
+        return self._settings
 
     def build_maps(self) -> Dict[str, Any]:
         scan = self._scan or self.scan()
@@ -328,11 +348,14 @@ class ArchAPI:
 
         _emit("validating output")
         report = adapter.validate_generated_code(files, plan, genome, scan=scan)
+        framework_validation_pass = report.success
 
         policy = self._policy_gate.validate_files(files, plan)
         report.errors.extend(policy.errors)
         report.warnings.extend(policy.warnings)
         report.success = report.success and policy.allowed
+
+        self._apply_strict_validation(report)
 
         result = GenerationResult(
             project_path=self.project_path,
@@ -340,6 +363,8 @@ class ArchAPI:
             files=files,
             validation_report=report,
             warnings=report.warnings,
+            policy_gate_pass=policy.allowed,
+            framework_validation_pass=framework_validation_pass,
         )
 
         if not dry_run and report.success:
@@ -377,7 +402,7 @@ class ArchAPI:
         plan_hint = adapter.plan_api(request, genome, maps)
 
         index = build_repository_index(scan, genome)
-        retrieved_context = ContextRetriever().retrieve(
+        retrieved_context = ContextRetriever(budget=self._settings.to_context_budget()).retrieve(
             request=request, plan=plan_hint, index=index
         )
         self._last_retrieved_context = retrieved_context
@@ -408,6 +433,8 @@ class ArchAPI:
                     success=False,
                     errors=[str(exc)],
                 ),
+                policy_gate_pass=False,
+                framework_validation_pass=False,
             )
 
         try:
@@ -430,6 +457,8 @@ class ArchAPI:
                     success=False,
                     errors=[str(exc)],
                 ),
+                policy_gate_pass=False,
+                framework_validation_pass=False,
             )
 
         # Stamp the request onto the plan
@@ -439,6 +468,7 @@ class ArchAPI:
         # layers present, no empty files, etc.
         adapter = self._adapter()
         report = adapter.validate_generated_code(files, plan, genome, scan=scan)
+        framework_validation_pass = report.success
 
         # Output safety gate: path containment, protected/bootstrap/config
         # files, unrequested middleware, embedded secrets.
@@ -455,6 +485,8 @@ class ArchAPI:
                 "Review generated files carefully."
             )
 
+        self._apply_strict_validation(report)
+
         plan.generation_allowed = report.success
         if not report.success:
             plan.reason = "; ".join(report.errors)
@@ -465,6 +497,8 @@ class ArchAPI:
             files=files,
             validation_report=report,
             warnings=report.warnings,
+            policy_gate_pass=policy.allowed,
+            framework_validation_pass=framework_validation_pass,
         )
 
         if not dry_run and report.success:
@@ -477,6 +511,27 @@ class ArchAPI:
         if self._llm is not None:
             return self._llm
 
-        from archapi.llm.openai_provider import OpenAIProvider
-        self._llm = OpenAIProvider(model=self._llm_model, api_key=self._api_key)
+        provider_name = self._settings.llm_provider
+        if provider_name == "openai":
+            from archapi.llm.openai_provider import OpenAIProvider
+            self._llm = OpenAIProvider(model=self._llm_model, api_key=self._api_key)
+        else:
+            # ArchAPIConfig.__post_init__ already validates this against
+            # KNOWN_LLM_PROVIDERS at construction time; this branch only
+            # matters if a provider is ever added to that set without a
+            # matching case here.
+            raise ArchAPIConfigError(f"No provider implementation wired up for: {provider_name!r}")
+
         return self._llm
+
+    def _apply_strict_validation(self, report: ValidationReport) -> None:
+        """
+        Optional extra caution (Phase 8C, off by default): escalate
+        non-fatal validation warnings -- e.g. the Phase 8A
+        naming-consistency warning -- into blocking errors. Never touches
+        PolicyGate or framework-validation *errors*, which always block
+        regardless of this setting.
+        """
+        if self._settings.strict_validation and report.warnings:
+            report.errors.extend(report.warnings)
+            report.success = False
