@@ -16,3 +16,15 @@ project_structure_full.txt
 test.txt
 fastapi_basic/
 express_basic/
+
+# Phase 8D: transient artifacts that must never be committed
+*.archapi-tmp
+.pytest_cache/
+*.whl
+*.tar.gz
+
+# Ad-hoc/local evaluation output -- evaluation/results/*.json committed
+# intentionally as historical experiment records stays tracked; only
+# explicitly-marked scratch/local runs are ignored.
+evaluation/results/*.local.json
+evaluation/results/*.scratch.json

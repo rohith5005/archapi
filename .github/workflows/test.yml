@@ -1,0 +1,76 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The Python versions ArchAPI declares support for in
+        # pyproject.toml's classifiers.
+        python-version: ["3.9", "3.10", "3.11", "3.12"]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install package and build/check tooling
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+          python -m pip install build twine
+
+      - name: Compile check
+        run: python -m compileall archapi evaluation
+
+      - name: Run deterministic test suite
+        # No OPENAI_API_KEY is set anywhere in this job -- the
+        # deterministic suite must never require one. The evaluation
+        # harness's real_llm opt-in (Phase 8B) is a separate, additional
+        # defense against an accidental paid call, not relied on alone.
+        run: python -m unittest discover -s tests -v
+
+      - name: Build sdist and wheel
+        run: |
+          rm -rf dist build
+          python -m build
+
+      - name: Check distribution metadata
+        run: python -m twine check dist/*
+
+  secret-scan:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Scan for key-shaped secrets
+        run: |
+          # Matches actual key-shaped values (e.g. real OpenAI sk-... /
+          # sk-proj-... tokens: a prefix followed by a long *continuous*
+          # alphanumeric run), not documentation/code that merely
+          # references the OPENAI_API_KEY environment variable name, and
+          # not human-readable hyphenated test-fixture strings like
+          # "sk-should-never-appear-in-output" (real key material never
+          # contains hyphens after the prefix).
+          if git --no-pager grep -nIE 'sk-proj-[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9_]{20,}' -- . ; then
+            echo "::error::Potential secret-shaped value found in tracked files."
+            exit 1
+          fi
+          echo "No key-shaped secrets found in tracked files."

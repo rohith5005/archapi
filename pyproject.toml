@@ -13,7 +13,9 @@ authors = [
   { name = "Rohith Chikkala" },
   { name = "Praneeth Koppolu" }
 ]
-dependencies = []
+dependencies = [
+  "tomli>=2.0.1; python_version < '3.11'",
+]
 keywords = ["rest-api", "code-generation", "architecture", "express", "fastapi"]
 
 classifiers = [

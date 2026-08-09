@@ -98,28 +98,12 @@ class GenerationResult:
                 + "; ".join(self.validation_report.errors)
             )
 
-        project_root = self.project_path.resolve()
+        # Phase 8D: all-or-nothing application with rollback. Same path
+        # safety checks apply() always had (absolute-path/traversal
+        # rejection, create-vs-overwrite conflict), now wrapped in a
+        # prepare -> write -> rollback-on-failure transaction so a failure
+        # partway through a multi-file apply can never leave the
+        # repository partially modified.
+        from archapi.generation.file_transaction import FileTransaction
 
-        for generated in self.files:
-            raw_path = Path(generated.path)
-
-            if raw_path.is_absolute():
-                raise PermissionError(
-                    f"Refusing to write to an absolute path: {raw_path}"
-                )
-
-            target = (project_root / raw_path).resolve()
-
-            # Last line of defense against path traversal, independent of
-            # whatever validation ran upstream.
-            if not target.is_relative_to(project_root):
-                raise PermissionError(
-                    f"Refusing to write outside the project directory: {generated.path}"
-                )
-
-            target.parent.mkdir(parents=True, exist_ok=True)
-
-            if target.exists() and generated.action == "create":
-                raise FileExistsError(f"Refusing to overwrite existing file: {target}")
-
-            target.write_text(generated.content, encoding="utf-8")
+        FileTransaction(self.project_path).apply(self.files)
