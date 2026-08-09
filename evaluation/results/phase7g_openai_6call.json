@@ -1,0 +1,183 @@
+{
+  "experiment": "phase7g_openai_6call",
+  "phase": "7G",
+  "calls": 6,
+  "provider": "openai",
+  "model": "gpt-4o-mini",
+  "script": "scripts/phase7g_real_provider_evaluation.py",
+  "description": "Three controlled A/B pairs (baseline vs. ArchAPI retrieval-aware generation) across Express TS, FastAPI, and Django DRF. Per pair, the repository, request, model, and validation logic are held constant; only the context-retrieval strategy (no retrieved_context vs. RepositoryIndex -> ContextRetriever -> PromptBuilder) varies.",
+  "schema_note": "Result objects use the original Phase 7G script's field names (CallResult in scripts/phase7g_real_provider_evaluation.py), not the Phase 8B EvaluationResult schema introduced afterward in evaluation/metrics.py -- preserved verbatim for historical fidelity.",
+  "known_finding": "The django-drf/archapi_retrieval result recorded here is a genuine historical failure (generation_allowed=false, framework_validation_pass=false): retrieval faithfully reproduced the repository's own flat tests.py convention (what django-admin startapp scaffolds by default), which DjangoDRFAdapter.validate_generated_code() rejected for lacking a literal \"test_\" substring -- a disagreement between repository evidence and ArchAPI's own validator, not a retrieval defect. Root-caused and generally fixed in Phase 8A. This historical record is intentionally left unmodified; tests/test_validator_repository_consistency.py reproduces the same scenario and asserts it now passes.",
+  "results": [
+    {
+      "framework": "express-typescript",
+      "request": "authenticated POST warranty claim API with validation",
+      "mode": "baseline",
+      "model": "gpt-4o-mini",
+      "retrieved_paths": [],
+      "generated_paths": [
+        "src/routes/claims.ts",
+        "src/controllers/claims.controller.ts",
+        "src/services/claims.service.ts",
+        "src/schemas/claims.schema.ts",
+        "src/tests/claims.test.ts"
+      ],
+      "generation_allowed": true,
+      "policy_gate_pass": true,
+      "framework_validation_pass": true,
+      "architecture_score": 100.0,
+      "unnecessary_file_count": 0,
+      "correct_layer_count": 5,
+      "auth_pattern_reused": false,
+      "validation_pattern_reused": false,
+      "parse_success": true,
+      "error": null
+    },
+    {
+      "framework": "express-typescript",
+      "request": "authenticated POST warranty claim API with validation",
+      "mode": "archapi_retrieval",
+      "model": "gpt-4o-mini",
+      "retrieved_paths": [
+        "src/routes/warranty-claim.routes.ts",
+        "src/routes/invoice.routes.ts",
+        "src/controllers/warranty-claim.controller.ts",
+        "src/controllers/appointment.controller.ts",
+        "src/services/warranty-claim.service.ts",
+        "src/services/appointment.service.ts",
+        "src/schemas/warranty-claim.schema.ts",
+        "src/schemas/appointment.schema.ts",
+        "tests/warranty-claim.test.ts",
+        "tests/appointment.test.ts"
+      ],
+      "generated_paths": [
+        "src/routes/warranty-claim.routes.ts",
+        "src/controllers/warranty-claim.controller.ts",
+        "src/services/warranty-claim.service.ts",
+        "src/schemas/warranty-claim.schema.ts",
+        "tests/warranty-claim.test.ts"
+      ],
+      "generation_allowed": true,
+      "policy_gate_pass": true,
+      "framework_validation_pass": true,
+      "architecture_score": 100.0,
+      "unnecessary_file_count": 0,
+      "correct_layer_count": 5,
+      "auth_pattern_reused": true,
+      "validation_pattern_reused": true,
+      "parse_success": true,
+      "error": null
+    },
+    {
+      "framework": "fastapi",
+      "request": "PATCH shipment status API with validation",
+      "mode": "baseline",
+      "model": "gpt-4o-mini",
+      "retrieved_paths": [],
+      "generated_paths": [
+        "app/routes/shipments_router.py",
+        "app/controllers/shipments_controller.py",
+        "app/services/shipments_service.py",
+        "app/schemas/shipment_schema.py",
+        "tests/test_shipments.py"
+      ],
+      "generation_allowed": true,
+      "policy_gate_pass": true,
+      "framework_validation_pass": true,
+      "architecture_score": 88.89,
+      "unnecessary_file_count": 0,
+      "correct_layer_count": 5,
+      "auth_pattern_reused": false,
+      "validation_pattern_reused": false,
+      "parse_success": true,
+      "error": null
+    },
+    {
+      "framework": "fastapi",
+      "request": "PATCH shipment status API with validation",
+      "mode": "archapi_retrieval",
+      "model": "gpt-4o-mini",
+      "retrieved_paths": [
+        "app/routers/shipment_router.py",
+        "app/routers/appointment_router.py",
+        "app/services/shipment_service.py",
+        "app/services/appointment_service.py",
+        "app/schemas/shipment_schema.py",
+        "app/schemas/appointment_schema.py",
+        "tests/test_shipment.py",
+        "tests/test_appointment.py"
+      ],
+      "generated_paths": [
+        "app/routers/shipment_router.py",
+        "app/services/shipment_service.py",
+        "app/schemas/shipment_schema.py",
+        "tests/test_shipment.py"
+      ],
+      "generation_allowed": true,
+      "policy_gate_pass": true,
+      "framework_validation_pass": true,
+      "architecture_score": 100.0,
+      "unnecessary_file_count": 0,
+      "correct_layer_count": 4,
+      "auth_pattern_reused": false,
+      "validation_pattern_reused": true,
+      "parse_success": true,
+      "error": null
+    },
+    {
+      "framework": "django-drf",
+      "request": "POST invoice API",
+      "mode": "baseline",
+      "model": "gpt-4o-mini",
+      "retrieved_paths": [],
+      "generated_paths": [
+        "invoices/urls.py",
+        "invoices/views.py",
+        "invoices/serializers.py",
+        "invoices/tests/test_invoice.py"
+      ],
+      "generation_allowed": true,
+      "policy_gate_pass": true,
+      "framework_validation_pass": true,
+      "architecture_score": 50.0,
+      "unnecessary_file_count": 0,
+      "correct_layer_count": 4,
+      "auth_pattern_reused": false,
+      "validation_pattern_reused": false,
+      "parse_success": true,
+      "error": null
+    },
+    {
+      "framework": "django-drf",
+      "request": "POST invoice API",
+      "mode": "archapi_retrieval",
+      "model": "gpt-4o-mini",
+      "retrieved_paths": [
+        "invoices/urls.py",
+        "appointments/urls.py",
+        "invoices/views.py",
+        "appointments/views.py",
+        "invoices/serializers.py",
+        "appointments/serializers.py",
+        "invoices/tests.py",
+        "appointments/tests.py"
+      ],
+      "generated_paths": [
+        "invoices/urls.py",
+        "invoices/views.py",
+        "invoices/serializers.py",
+        "invoices/tests.py"
+      ],
+      "generation_allowed": false,
+      "policy_gate_pass": true,
+      "framework_validation_pass": false,
+      "architecture_score": 40.0,
+      "unnecessary_file_count": 0,
+      "correct_layer_count": 4,
+      "auth_pattern_reused": false,
+      "validation_pattern_reused": false,
+      "parse_success": true,
+      "error": null
+    }
+  ]
+}
