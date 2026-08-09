@@ -318,15 +318,27 @@ def _extract_routes(text: str) -> Tuple[List[str], List[str]]:
 
 
 def _extract_entity_terms(rel_path: Path) -> List[str]:
-    stem = rel_path.stem
-    raw_words: List[str] = []
+    # Filename alone is enough for conventions like refund_router.py, but
+    # frameworks that group per-resource files under a resource-named
+    # directory with otherwise-identical filenames (e.g. Django DRF's
+    # invoices/views.py vs shipments/views.py) carry the resource identity
+    # in the directory, not the filename -- so both are considered. Layer
+    # words (routers/, services/, middleware/, ...) contribute nothing
+    # either way, since they're filtered below.
+    candidates: List[str] = []
+    parent_name = rel_path.parent.name
+    if parent_name not in ("", "."):
+        candidates.append(parent_name)
+    candidates.append(rel_path.stem)
 
-    for chunk in _WORD_SPLIT_RE.split(stem):
-        if not chunk:
-            continue
-        for sub in _CAMEL_SPLIT_RE.split(chunk):
-            if sub:
-                raw_words.append(sub.lower())
+    raw_words: List[str] = []
+    for candidate in candidates:
+        for chunk in _WORD_SPLIT_RE.split(candidate):
+            if not chunk:
+                continue
+            for sub in _CAMEL_SPLIT_RE.split(chunk):
+                if sub:
+                    raw_words.append(sub.lower())
 
     terms: List[str] = []
     seen = set()

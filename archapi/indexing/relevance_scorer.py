@@ -69,7 +69,7 @@ class RelevanceScorer:
             points = 0
             reasons: List[str] = []
 
-            entity_matches = resource_tokens & set(unit.entity_terms)
+            entity_matches = resource_tokens & _normalized_set(unit.entity_terms)
             if entity_matches:
                 points += _ENTITY_MATCH_POINTS
                 reasons.append(f"resource match: {', '.join(sorted(entity_matches))}")
@@ -118,12 +118,7 @@ class RelevanceScorer:
         ))
 
     def _resource_tokens(self, plan: APIPlan) -> Set[str]:
-        tokens: Set[str] = set()
-        for entity in plan.entities or []:
-            lowered = entity.lower()
-            tokens.add(lowered)
-            tokens.add(_normalize_token(lowered))
-        return tokens
+        return _normalized_set(entity.lower() for entity in (plan.entities or []))
 
     def _symbol_tokens(self, unit: IndexedUnit) -> Set[str]:
         tokens: Set[str] = set()
@@ -167,3 +162,15 @@ def _normalize_token(token: str) -> str:
     if len(token) > 3 and token.endswith("s"):
         return token[:-1]
     return token
+
+
+def _normalized_set(tokens) -> Set[str]:
+    """Both raw and singular-normalized forms, so e.g. plan entity "Invoice"
+    matches an entity term derived from a plural resource directory like
+    "invoices/" (Django DRF's per-app layout), and vice versa."""
+    result: Set[str] = set()
+    for token in tokens:
+        lowered = token.lower()
+        result.add(lowered)
+        result.add(_normalize_token(lowered))
+    return result
