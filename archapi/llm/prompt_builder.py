@@ -1,20 +1,17 @@
 from __future__ import annotations
 
 import textwrap
-from pathlib import Path
-from typing import Optional
+from typing import Dict, List, Optional
 
-from archapi.types import APIGenome, ScanResult
+from archapi.indexing.context_retriever import RetrievedContext
+from archapi.types import APIGenome, APIPlan
 
 
-# Maximum characters to include from any single example file
-_MAX_FILE_SNIPPET = 1500
-
-# Maximum total prompt size (rough guard — real token counting not done here)
+# Maximum total prompt size (rough guard -- real token counting not done here)
 _MAX_PROMPT_CHARS = 14_000
 
 # Per-framework file-naming conventions that ArchAPI's own post-generation
-# validator enforces — telling the model up front avoids generating
+# validator enforces -- telling the model up front avoids generating
 # architecturally-correct code that still fails the structural check.
 _REQUIRED_LAYER_HINTS = {
     "fastapi": (
@@ -38,33 +35,57 @@ _REQUIRED_LAYER_HINTS = {
     ),
 }
 
+_LABELED_CATEGORIES = (
+    ("ROUTE", "routes"),
+    ("CONTROLLER", "controllers"),
+    ("SERVICE", "services"),
+    ("SCHEMA", "schemas"),
+    ("MODEL", "models"),
+    ("AUTHENTICATION PATTERN", "auth_patterns"),
+    ("VALIDATION PATTERN", "validation_patterns"),
+    ("TEST", "tests"),
+)
+
 
 class PromptBuilder:
     """
-    Builds an architecture-aware LLM prompt that includes:
+    Builds an architecture-aware LLM prompt from:
 
     - The detected framework and genome (naming / style conventions)
-    - Relevant code snippets from the scanned project
     - The user's natural-language API request
-    - A strict JSON output schema instruction
+    - An (optional) deterministically-inferred implementation plan
+    - An (optional) pre-retrieved, budgeted RetrievedContext (Phase 7D) of
+      the repository examples most relevant to this specific request
+
+    This class does not select which repository files are relevant --
+    that decision belongs to ContextRetriever. If no retrieved_context is
+    supplied, the prompt is built from architecture/genome/request
+    information alone; it does not fall back to picking arbitrary project
+    files itself.
     """
 
     def build(
         self,
         request: str,
         genome: APIGenome,
-        scan: Optional[ScanResult] = None,
+        plan: Optional[APIPlan] = None,
+        retrieved_context: Optional[RetrievedContext] = None,
     ) -> str:
-        sections: list[str] = []
+        sections: List[str] = []
 
         sections.append(self._header())
-        sections.append(self._genome_section(genome))
-
-        if scan is not None:
-            sections.append(self._project_context_section(scan, genome))
-
+        sections.append(self._architecture_section(genome))
         sections.append(self._request_section(request))
-        sections.append(self._output_schema_section(genome))
+
+        if plan is not None:
+            sections.append(self._plan_section(plan))
+
+        if retrieved_context is not None:
+            examples = self._examples_section(retrieved_context)
+            if examples:
+                sections.append(examples)
+
+        sections.append(self._generation_rules_section(genome))
 
         prompt = "\n\n".join(s for s in sections if s.strip())
 
@@ -89,9 +110,9 @@ class PromptBuilder:
             the project. Match what exists as closely as possible.
         """)
 
-    def _genome_section(self, genome: APIGenome) -> str:
+    def _architecture_section(self, genome: APIGenome) -> str:
         lines = [
-            "## Detected Project Architecture (Genome)",
+            "## PROJECT ARCHITECTURE",
             "",
             f"- Framework       : {genome.framework}",
             f"- Route style     : {genome.route_style}",
@@ -110,41 +131,58 @@ class PromptBuilder:
 
         return "\n".join(lines)
 
-    def _project_context_section(self, scan: ScanResult, genome: APIGenome) -> str:
-        """Include the most relevant existing code snippets as architecture examples."""
-        snippets: list[str] = []
-        budget = _MAX_PROMPT_CHARS // 2  # dedicate half the budget to examples
+    def _request_section(self, request: str) -> str:
+        return f"## USER REQUEST\n\n{request}"
 
-        # Priority order: routes > services > schemas > tests > controllers
-        priority_lists = [
-            ("Route example", scan.routes),
-            ("Service example", scan.services),
-            ("Schema example", scan.schemas),
-            ("Test example", scan.tests),
-            ("Controller example", scan.controllers),
-            ("Middleware example", scan.middleware),
+    def _plan_section(self, plan: APIPlan) -> str:
+        lines = [
+            "## IMPLEMENTATION PLAN",
+            "",
+            "Inferred from the request above -- refine as needed, but stay consistent with it:",
+            "",
+            f"- Method   : {plan.method}",
+            f"- Path     : {plan.path}",
+            f"- Entities : {', '.join(plan.entities) or 'unknown'}",
+            f"- Layers   : {', '.join(plan.layers) or 'unknown'}",
         ]
+        return "\n".join(lines)
 
-        for label, paths in priority_lists:
-            if not paths or budget <= 0:
-                break
-            path = paths[0]
-            snippet = self._read_snippet(path, genome.framework)
-            if snippet:
-                block = f"### {label}: `{path.name}`\n```\n{snippet}\n```"
-                snippets.append(block)
-                budget -= len(block)
+    def _examples_section(self, context: RetrievedContext) -> str:
+        blocks: List[str] = []
+        seen_paths: Dict[str, str] = {}
 
-        if not snippets:
+        for label, attr in _LABELED_CATEGORIES:
+            for item in getattr(context, attr):
+                if item.path in seen_paths:
+                    blocks.append(
+                        f"[{label}] {item.path}\n"
+                        f"(same file as the {seen_paths[item.path]} example above -- "
+                        "also demonstrates this pattern)"
+                    )
+                    continue
+
+                seen_paths[item.path] = label
+                blocks.append(f"[{label}] {item.path}\n```\n{item.snippet}\n```")
+
+        if not blocks:
             return ""
 
-        return "## Existing Project Code Examples\n\n" + "\n\n".join(snippets)
+        intro = textwrap.dedent("""\
+            ## RELEVANT EXISTING PROJECT EXAMPLES
 
-    def _request_section(self, request: str) -> str:
-        return f"## API Generation Request\n\n{request}"
+            These examples were selected from this repository because they are the
+            most relevant to the request above. Imitate their architectural patterns
+            -- naming, structure, imports, error handling -- rather than copying their
+            literal business logic. Reuse the authentication and validation
+            conventions demonstrated here instead of inventing new ones.
+        """)
 
-    def _output_schema_section(self, genome: APIGenome) -> str:
+        return intro + "\n" + "\n\n".join(blocks)
+
+    def _generation_rules_section(self, genome: APIGenome) -> str:
         schema = textwrap.dedent("""\
+            ## GENERATION RULES
+
             ## Required JSON Output Format
 
             Respond with ONLY valid JSON — no markdown fences, no commentary.
@@ -170,6 +208,12 @@ class PromptBuilder:
         rules = [
             f"- Generate files for framework: {genome.framework}",
             "- Match the exact naming conventions, imports, and patterns seen above",
+            "- Imitate the architectural patterns in the examples above; do not copy "
+            "their business logic verbatim",
+            "- Reuse the existing authentication and validation conventions shown "
+            "above rather than inventing new ones",
+            "- Only generate files required by the implementation plan above; do "
+            "not add unrequested infrastructure",
             "- Every generated file must be complete and immediately usable",
             "- Use {param} placeholders in paths (e.g. /users/{user_id}/orders)",
             "- Do not create new application entry-point or bootstrap files "
@@ -184,15 +228,3 @@ class PromptBuilder:
             rules.insert(1, f"- Required file naming for this framework: {layer_hint}")
 
         return schema + "\n".join(rules) + "\n"
-
-    # ------------------------------------------------------------------
-    # Helpers
-    # ------------------------------------------------------------------
-
-    def _read_snippet(self, path: Path, framework: str) -> str:
-        """Read up to _MAX_FILE_SNIPPET characters from a source file."""
-        try:
-            text = path.read_text(encoding="utf-8", errors="ignore")
-            return text[:_MAX_FILE_SNIPPET] + ("..." if len(text) > _MAX_FILE_SNIPPET else "")
-        except OSError:
-            return ""

@@ -62,6 +62,11 @@ class ArchAPI:
         self._maps: Optional[Dict[str, Any]] = None
         self._genome: Optional[APIGenome] = None
 
+        # Set by the LLM generation path; kept for research instrumentation
+        # (Phase 7 Step 15) so retrieval decisions remain inspectable after
+        # generation without re-deriving them.
+        self._last_retrieved_context = None
+
         # Resolve LLM provider (lazy — only initialised when use_llm=True)
         self._llm = llm_provider  # may be None; initialised in _resolve_llm()
 
@@ -352,13 +357,33 @@ class ArchAPI:
         from archapi.llm.prompt_builder import PromptBuilder
         from archapi.llm.response_parser import ResponseParser
         from archapi.llm.errors import LLMProviderError, LLMParseError
+        from archapi.indexing.repository_index import build_repository_index
+        from archapi.indexing.context_retriever import ContextRetriever
 
         genome = self._genome or self.extract_genome()
         scan = self._scan or self.scan()
+        maps = self._maps or self.build_maps()
 
         llm = self._resolve_llm()
 
-        prompt = PromptBuilder().build(request, genome, scan)
+        # A deterministic plan hint (method/path/entities/layers) purely to
+        # drive retrieval and to show the model what was inferred from the
+        # request. This is separate from -- and does not gate -- the final
+        # plan, which still comes from parsing the LLM's own JSON response
+        # below; a low-confidence hint must not silently block LLM
+        # generation the way it does on the deterministic path.
+        adapter = self._adapter()
+        plan_hint = adapter.plan_api(request, genome, maps)
+
+        index = build_repository_index(scan, genome)
+        retrieved_context = ContextRetriever().retrieve(
+            request=request, plan=plan_hint, index=index
+        )
+        self._last_retrieved_context = retrieved_context
+
+        prompt = PromptBuilder().build(
+            request, genome, plan=plan_hint, retrieved_context=retrieved_context
+        )
         prompt = self._context_redactor.redact(prompt)
 
         try:
