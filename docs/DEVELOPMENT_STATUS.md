@@ -60,8 +60,8 @@ See [`RESEARCH_REPORT.md`](RESEARCH_REPORT.md) for the evidence and its limitati
 | 8B Evaluation harness | **COMPLETE** |
 | 8C Configuration + CLI | **COMPLETE** |
 | 8D Reliability + CI | **COMPLETE** |
-| 8E Documentation | **IN PROGRESS** |
-| 8F v1.0 release candidate | PENDING |
+| 8E Documentation | **COMPLETE** |
+| 8F v1.0 release candidate | **IN PROGRESS** |
 | 8G v1.0 release | PENDING |
 
 ### 8A — Repository-aware validation
@@ -80,13 +80,17 @@ Audited all five framework adapters' structural validators for hardcoded naming 
 
 `archapi/generation/file_transaction.py`: atomic multi-file application with rollback on partial failure, no git dependency. Clean-install verification (fresh venv, wheel-only install). `.github/workflows/test.yml`: matrix CI across the Python versions this project declares support for, plus a targeted secret scan. `tests/test_reliability.py`.
 
-### 8E — Documentation (this phase)
+### 8E — Documentation
 
-Bringing `README.md` and `docs/` up to date with the system as it actually exists: architecture, configuration, CLI, security boundary, evaluation harness, and a research report that reports the Phase 7G pilot's real result — including the one call that failed — rather than a retroactively corrected one.
+Brought `README.md` and `docs/` up to date with the system as it actually exists: architecture, configuration, CLI, security boundary, evaluation harness, and a research report that reports the Phase 7G pilot's real result — including the one call that failed — rather than a retroactively corrected one.
 
-### 8F / 8G — Not started
+### 8F — v1.0 release candidate (this phase)
 
-Release-candidate verification (version decision, clean wheel/sdist install, full CI, documentation links, metadata, secret audit, a controlled real-LLM smoke test) and the 1.0.0 release itself. The package is not yet versioned as 1.0.0.
+Version moved to `1.0.0`. Full deterministic gate, secret audit, exact release artifacts built and inspected (wheel contains only `archapi/*` runtime files — no `evaluation/`, `tests/`, or scratch content), clean-wheel installation into an isolated venv verified from outside the repo checkout, installed-CLI smoke tests (scan/plan/generate, `--json`, `archapi.toml` including a deliberately invalid config failing safely, atomic `--apply`), and one controlled real-LLM dry-run against the installed wheel with a freshly-provided credential (a previously-used key was treated as no longer trustworthy for this step and not reused).
+
+### 8G — Not started
+
+Tag `v1.0.0`, publish the already-verified artifacts to PyPI, create the GitHub release, verify installation from PyPI in another clean environment, announce.
 
 ## Test count
 

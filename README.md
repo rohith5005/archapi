@@ -11,7 +11,7 @@ Two generation modes:
 
 Dedicated framework support: **Express TypeScript, FastAPI, Flask, Django REST Framework, NestJS** (anything else falls back to a generic, lower-confidence adapter).
 
-Current checkpoint: **0.5.0** (pre-1.0 — see [Development Status](docs/DEVELOPMENT_STATUS.md))
+Current version: **1.0.0** (see [Development Status](docs/DEVELOPMENT_STATUS.md))
 
 ## Installation from PyPI
 
