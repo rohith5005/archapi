@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from archapi.frameworks.generic import GenericAdapter
 from archapi.types import APIPlan, APIGenome, GeneratedFile, ScanResult, ValidationReport
@@ -208,6 +208,7 @@ def test_{entity_lower}_placeholder(client):
         files: List[GeneratedFile],
         plan: APIPlan,
         genome: APIGenome,
+        scan: Optional[ScanResult] = None,
     ) -> ValidationReport:
         errors: List[str] = []
         warnings: List[str] = []
@@ -222,7 +223,15 @@ def test_{entity_lower}_placeholder(client):
             if name not in generated_names:
                 errors.append(f"Missing generated DRF layer: {name}")
 
-        if not any("test_" in Path(file.path).name for file in files):
+        # Test-file naming legitimately varies in real Django projects --
+        # a flat per-app tests.py (what `django-admin startapp` scaffolds
+        # by default) is just as valid as a tests/test_*.py package, unlike
+        # views.py/serializers.py/urls.py above, which are tightly
+        # conventional. Classify via the same LayerClassifier used for
+        # indexing (Phase 7B) rather than requiring a literal "test_"
+        # substring, which rejected the legitimate flat-tests.py
+        # convention (found via the Phase 7G real-provider evaluation).
+        if not self._has_generated_layer(files, "test"):
             errors.append("Missing generated DRF test layer.")
 
         for file in files:
@@ -235,6 +244,8 @@ def test_{entity_lower}_placeholder(client):
 
         if genome.confidence < 0.75:
             warnings.append("Architecture confidence is moderate; review generated files before applying.")
+
+        warnings.extend(self._layer_naming_consistency_warnings(files, scan))
 
         return ValidationReport(success=not errors, errors=errors, warnings=warnings)
 

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from archapi.frameworks.generic import GenericAdapter
 from archapi.types import APIPlan, APIGenome, GeneratedFile, ScanResult, ValidationReport
@@ -208,6 +208,7 @@ export type {entity_pascal}Request = z.infer<typeof {entity_lower}RequestSchema>
         files: List[GeneratedFile],
         plan: APIPlan,
         genome: APIGenome,
+        scan: Optional[ScanResult] = None,
     ) -> ValidationReport:
         errors: List[str] = []
         warnings: List[str] = []
@@ -215,12 +216,19 @@ export type {entity_pascal}Request = z.infer<typeof {entity_lower}RequestSchema>
         if not plan.generation_allowed:
             errors.append(plan.reason or "Generation not allowed.")
 
-        required_layers = ["routes", "controllers", "services", "schemas", "tests"]
+        required_layers = ["routes", "controllers", "services", "schemas"]
         generated_paths = [str(file.path) for file in files]
 
         for layer in required_layers:
             if not any(layer in path for path in generated_paths):
                 errors.append(f"Missing generated {layer} layer.")
+
+        # Test-file naming legitimately varies (x.test.ts vs x.spec.ts vs a
+        # dedicated tests/ dir with no marker in the filename itself),
+        # unlike the directory-name checks above -- classify via the same
+        # LayerClassifier used for indexing rather than one substring.
+        if not self._has_generated_layer(files, "test"):
+            errors.append("Missing generated tests layer.")
 
         for file in files:
             if not file.content.strip():
@@ -233,5 +241,7 @@ export type {entity_pascal}Request = z.infer<typeof {entity_lower}RequestSchema>
 
         if genome.confidence < 0.75:
             warnings.append("Architecture confidence is moderate; review generated files before applying.")
+
+        warnings.extend(self._layer_naming_consistency_warnings(files, scan))
 
         return ValidationReport(success=not errors, errors=errors, warnings=warnings)

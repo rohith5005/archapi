@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from archapi.frameworks.base import FrameworkAdapter
-from archapi.mapping.layer_classifier import LayerClassifier
+from archapi.mapping.layer_classifier import LayerClassifier, _tokenize
 from archapi.planning.intent_planner import IntentPlanner
 from archapi.types import (
     APIPlan,
@@ -169,6 +169,7 @@ class GenericAdapter(FrameworkAdapter):
         files: List[GeneratedFile],
         plan: APIPlan,
         genome: APIGenome,
+        scan: Optional[ScanResult] = None,
     ) -> ValidationReport:
         errors = []
         warnings = []
@@ -183,7 +184,90 @@ class GenericAdapter(FrameworkAdapter):
             if not file.content.strip():
                 errors.append(f"Generated file is empty: {file.path}")
 
+        warnings.extend(self._layer_naming_consistency_warnings(files, scan))
+
         return ValidationReport(success=not errors, errors=errors, warnings=warnings)
+
+    # ------------------------------------------------------------------
+    # Shared validation helpers (used by all concrete framework adapters)
+    # ------------------------------------------------------------------
+
+    def _safe_classify(self, path: Path):
+        """
+        LayerClassifier requires a project-relative path and raises on
+        anything else. Generated file paths reach this validator *before*
+        PolicyGate rejects malformed/adversarial ones (e.g. an absolute
+        path), so classification here must degrade to "doesn't match any
+        layer" rather than raise -- PolicyGate remains the actual gate for
+        those cases; this only decides layer-presence/naming checks.
+        """
+        try:
+            return self._classifier.classify(path, framework=self.name)
+        except ValueError:
+            return None
+
+    def _has_generated_layer(self, files: List[GeneratedFile], layer: str) -> bool:
+        """
+        Whether any generated file classifies into the given architectural
+        layer, per the same LayerClassifier used for repository indexing
+        (Phase 7B) -- token-based, so it recognizes the realistic naming
+        variants a layer can legitimately take (e.g. test_x.py, x_test.py,
+        x.spec.ts, or a bare tests.py) instead of one hardcoded pattern.
+        """
+        for file in files:
+            classification = self._safe_classify(Path(file.path))
+            if classification is not None and classification.layer == layer:
+                return True
+        return False
+
+    def _layer_naming_consistency_warnings(
+        self,
+        files: List[GeneratedFile],
+        scan: Optional[ScanResult],
+    ) -> List[str]:
+        """
+        Non-blocking evidence-based check: when the repository already has
+        files for a generated file's layer, flag (warn, don't reject) if
+        the new file shares no naming token with any of them -- e.g. every
+        existing route file ends in `_router.py` but the generated one
+        doesn't. No repository evidence for that layer yet (a project's
+        first file of a kind) means nothing to compare against, so no
+        warning is possible or expected.
+        """
+        if scan is None:
+            return []
+
+        bucket_by_layer = {
+            "route": scan.routes,
+            "controller": scan.controllers,
+            "service": scan.services,
+            "schema": scan.schemas,
+            "model": scan.models,
+            "test": scan.tests,
+        }
+
+        warnings: List[str] = []
+        for file in files:
+            classification = self._safe_classify(Path(file.path))
+            if classification is None:
+                continue
+            existing = bucket_by_layer.get(classification.layer)
+            if not existing:
+                continue
+
+            new_tokens = set(_tokenize(Path(file.path).stem))
+            shares_token = any(
+                new_tokens & set(_tokenize(Path(existing_path).stem))
+                for existing_path in existing
+            )
+            if not shares_token:
+                warnings.append(
+                    f"Generated {classification.layer} file '{file.path}' shares no "
+                    f"naming token with any existing {classification.layer} file in "
+                    "this project; verify it matches the project's naming convention."
+                )
+
+        return warnings
 
     def _walk_files(self, root: Path) -> List[Path]:
         files = []

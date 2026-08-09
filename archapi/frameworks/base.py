@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from archapi.types import (
     APIPlan,
@@ -52,5 +52,14 @@ class FrameworkAdapter(ABC):
         files: List[GeneratedFile],
         plan: APIPlan,
         genome: APIGenome,
+        scan: Optional[ScanResult] = None,
     ) -> ValidationReport:
+        """
+        :param scan: The project's ScanResult, when available. Lets a
+            validator check generated files against conventions the
+            repository itself demonstrates (e.g. an existing project-local
+            test-naming style), rather than only a hardcoded framework
+            default. Optional and backward compatible -- callers/tests that
+            don't have a ScanResult on hand may omit it.
+        """
         raise NotImplementedError

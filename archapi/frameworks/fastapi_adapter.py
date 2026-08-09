@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from archapi.frameworks.generic import GenericAdapter
 from archapi.types import APIPlan, APIGenome, GeneratedFile, ScanResult, ValidationReport
@@ -152,6 +152,7 @@ class {entity_pascal}Response(BaseModel):
         files: List[GeneratedFile],
         plan: APIPlan,
         genome: APIGenome,
+        scan: Optional[ScanResult] = None,
     ) -> ValidationReport:
         errors: List[str] = []
         warnings: List[str] = []
@@ -166,7 +167,11 @@ class {entity_pascal}Response(BaseModel):
             if not any(path.endswith(suffix) for path in generated_paths):
                 errors.append(f"Missing generated FastAPI layer: {suffix}")
 
-        if not any("/test_" in path or path.startswith("tests/test_") for path in generated_paths):
+        # Test-file naming legitimately varies (test_x.py vs x_test.py,
+        # a flat tests.py, ...), unlike the suffixes above which are
+        # tightly conventional -- classify via the same LayerClassifier
+        # used for indexing rather than one hardcoded pattern.
+        if not self._has_generated_layer(files, "test"):
             errors.append("Missing generated FastAPI test layer.")
 
         for file in files:
@@ -180,5 +185,7 @@ class {entity_pascal}Response(BaseModel):
 
         if genome.confidence < 0.75:
             warnings.append("Architecture confidence is moderate; review generated files before applying.")
+
+        warnings.extend(self._layer_naming_consistency_warnings(files, scan))
 
         return ValidationReport(success=not errors, errors=errors, warnings=warnings)

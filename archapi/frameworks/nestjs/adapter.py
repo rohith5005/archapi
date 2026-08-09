@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from archapi.frameworks.generic import GenericAdapter
 from archapi.types import APIPlan, APIGenome, GeneratedFile, ScanResult, ValidationReport
@@ -218,6 +218,7 @@ describe("{entity_pascal}Controller", () => {{
         files: List[GeneratedFile],
         plan: APIPlan,
         genome: APIGenome,
+        scan: Optional[ScanResult] = None,
     ) -> ValidationReport:
         errors: List[str] = []
         warnings: List[str] = []
@@ -225,6 +226,8 @@ describe("{entity_pascal}Controller", () => {{
         if not plan.generation_allowed:
             errors.append(plan.reason or "Generation not allowed.")
 
+        # .module.ts has no realistic naming alternative in NestJS (Nest
+        # CLI-enforced convention), so it stays an exact suffix check.
         required_suffixes = [".controller.ts", ".service.ts", ".module.ts", ".dto.ts"]
         generated_paths = [str(file.path) for file in files]
 
@@ -232,7 +235,11 @@ describe("{entity_pascal}Controller", () => {{
             if not any(path.endswith(suffix) for path in generated_paths):
                 errors.append(f"Missing generated NestJS layer: {suffix}")
 
-        if not any(".spec.ts" in path for path in generated_paths):
+        # Test-file naming legitimately varies (.spec.ts is the Nest CLI
+        # default, but .test.ts is also valid Jest convention) -- classify
+        # via the same LayerClassifier used for indexing rather than one
+        # hardcoded substring.
+        if not self._has_generated_layer(files, "test"):
             errors.append("Missing generated NestJS spec/test layer.")
 
         for file in files:
@@ -245,5 +252,7 @@ describe("{entity_pascal}Controller", () => {{
 
         if genome.confidence < 0.75:
             warnings.append("Architecture confidence is moderate; review generated files before applying.")
+
+        warnings.extend(self._layer_naming_consistency_warnings(files, scan))
 
         return ValidationReport(success=not errors, errors=errors, warnings=warnings)

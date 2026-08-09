@@ -317,6 +317,7 @@ class ArchAPI:
     def _generate_deterministic(self, request: str, dry_run: bool = True) -> GenerationResult:
         maps = self._maps or self.build_maps()
         genome = self._genome or self.extract_genome()
+        scan = self._scan or self.scan()
 
         _emit("planning API")
         plan = self.plan_api(request)
@@ -326,7 +327,7 @@ class ArchAPI:
         files = adapter.generate_code(plan, genome, maps)
 
         _emit("validating output")
-        report = adapter.validate_generated_code(files, plan, genome)
+        report = adapter.validate_generated_code(files, plan, genome, scan=scan)
 
         policy = self._policy_gate.validate_files(files, plan)
         report.errors.extend(policy.errors)
@@ -437,7 +438,7 @@ class ArchAPI:
         # Same structural validation the deterministic path gets: required
         # layers present, no empty files, etc.
         adapter = self._adapter()
-        report = adapter.validate_generated_code(files, plan, genome)
+        report = adapter.validate_generated_code(files, plan, genome, scan=scan)
 
         # Output safety gate: path containment, protected/bootstrap/config
         # files, unrequested middleware, embedded secrets.
