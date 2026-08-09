@@ -32,7 +32,12 @@ jobs:
       - name: Install package and build/check tooling
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e .
+          # The [openai] extra is a *test* dependency here, not a runtime
+          # requirement for deterministic-only usage: several tests mock
+          # only OpenAIProvider.complete() (never a real network call) but
+          # still exercise its real __init__/client construction, which
+          # needs the openai package importable.
+          python -m pip install -e ".[openai]"
           python -m pip install build twine
 
       - name: Compile check
