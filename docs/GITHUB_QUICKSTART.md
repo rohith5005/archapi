@@ -21,8 +21,8 @@ python -m pip install -e .
 ## Test
 
 ```bash
-python -m compileall archapi
-python -m unittest tests.test_archapi_suite -v
+python -m compileall archapi evaluation
+python -m unittest discover -s tests -v
 ```
 
 ## Use from PyPI instead

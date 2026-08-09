@@ -8,6 +8,11 @@ This package is intentionally kept outside `archapi/` (the runtime
 library) — it is research/evaluation tooling, not a component the public
 library depends on.
 
+See [`docs/EVALUATION.md`](../docs/EVALUATION.md) for the full usage guide
+and [`docs/RESEARCH_REPORT.md`](../docs/RESEARCH_REPORT.md) for what the
+Phase 7G pilot in `results/phase7g_openai_6call.json` actually shows and
+its limitations.
+
 ## Layout
 
 ```

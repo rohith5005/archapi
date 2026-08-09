@@ -1,44 +1,17 @@
 # ArchAPI
 
-ArchAPI is a Python library for architecture-preserving REST API generation.
+ArchAPI is a Python library and CLI for architecture-preserving REST API generation.
 
-It scans an existing backend project, detects the framework, understands the project structure, plans a REST API, generates framework-specific files, validates the output, and writes files only when explicitly requested.
+Instead of generating API code from a generic template or an LLM's default style, ArchAPI studies your *existing* backend project first — its framework, folder conventions, naming style, authentication and validation patterns — and generates new API layers that match it. Generation is a dry-run preview by default; nothing is written to disk unless you explicitly ask for it.
 
-## Current Status
+Two generation modes:
 
-Current checkpoint: **0.5.0**
+- **Deterministic** — rule-based templates, works fully offline.
+- **LLM-assisted** (`--llm`) — an LLM writes the code, guided by an architecture-aware retrieval pipeline that selects and shows the model the repository examples most relevant to your specific request (not arbitrary or first-found files) — see [Architecture](docs/ARCHITECTURE.md).
 
-ArchAPI currently supports:
+Dedicated framework support: **Express TypeScript, FastAPI, Flask, Django REST Framework, NestJS** (anything else falls back to a generic, lower-confidence adapter).
 
-- Express TypeScript
-- FastAPI
-- Flask
-- Django REST Framework
-- NestJS
-- Generic fallback detection for unsupported projects
-
-Core features:
-
-- Framework detection
-- Project scanning
-- API architecture modeling
-- Confidence scoring
-- Low-confidence blocking
-- Strict config mode
-- REST intent planning
-- Dry-run code generation
-- Safe apply behavior
-- Overwrite protection
-- Cache and changed-file detection
-- Command-line interface (`archapi detect|scan|plan|generate`)
-- LLM-first generation mode (optional, OpenAI-backed)
-- Secret scanning helpers
-- Context redaction before any LLM call
-- Output safety policy gate (path traversal, absolute paths, protected
-  directories, bootstrap/config files, unrequested middleware, secret-shaped
-  content)
-- Architecture consistency scoring
-- Unified regression test suite
+Current checkpoint: **0.5.0** (pre-1.0 — see [Development Status](docs/DEVELOPMENT_STATUS.md))
 
 ## Installation from PyPI
 
@@ -80,8 +53,8 @@ python -c "from archapi import ArchAPI; print('GitHub source install worked')"
 ## Run Tests
 
 ```bash
-python -m compileall archapi
-python -m unittest tests.test_archapi_suite -v
+python -m compileall archapi evaluation
+python -m unittest discover -s tests -v
 ```
 
 Or:
@@ -93,12 +66,35 @@ Or:
 Expected result:
 
 ```text
-Ran 32 tests
+Ran 231 tests
 
 OK
 ```
 
-## Basic Usage
+No `OPENAI_API_KEY` is required — the full suite never makes a real network call.
+
+## Quickstart
+
+```bash
+pip install archapi
+
+archapi scan .
+archapi plan . "Create authenticated POST API for warranty claim"
+
+# dry-run by default
+archapi generate . "Create authenticated POST API for warranty claim"
+
+# LLM-assisted, still dry-run -- retrieval selects the repository examples
+# most relevant to this request (see docs/ARCHITECTURE.md)
+archapi generate . "Create authenticated POST API for warranty claim" --llm
+
+# explicit mutation -- always opt-in
+archapi generate . "Create authenticated POST API for warranty claim" --llm --apply
+```
+
+Full CLI reference (all commands, flags, exit codes): [`docs/CLI.md`](docs/CLI.md).
+
+## Basic Usage (Python API)
 
 ```python
 from archapi import ArchAPI
@@ -106,7 +102,7 @@ from archapi import ArchAPI
 engine = ArchAPI("./sample_projects/express_basic")
 
 result = engine.generate_api(
-    "Create GET API for user order history",
+    "Create GET API for invoice",
     dry_run=True,
 )
 
@@ -120,17 +116,17 @@ print(result.diff)
 ```bash
 archapi detect ./sample_projects/express_basic
 archapi scan ./sample_projects/express_basic
-archapi plan ./sample_projects/express_basic "Create GET API for user order history"
-archapi generate ./sample_projects/express_basic "Create GET API for user order history"
+archapi plan ./sample_projects/express_basic "Create GET API for shipment status"
+archapi generate ./sample_projects/express_basic "Create GET API for shipment status"
 
 # Architecture-aware LLM generation instead of deterministic templates
-archapi generate ./sample_projects/express_basic "Create GET API for user order history" --llm
+archapi generate ./sample_projects/express_basic "Create GET API for shipment status" --llm
 
 # Write files to disk instead of a dry run -- always opt-in, always explicit
-archapi generate ./sample_projects/express_basic "Create GET API for user order history" --llm --apply
+archapi generate ./sample_projects/express_basic "Create GET API for shipment status" --llm --apply
 
 # Machine-readable output for CI/tooling (any command)
-archapi generate ./sample_projects/express_basic "Create GET API for user order history" --json
+archapi generate ./sample_projects/express_basic "Create GET API for shipment status" --json
 ```
 
 `generate` is a dry-run preview by default; nothing is written to disk unless
@@ -142,7 +138,8 @@ errors; without it, errors are concise and never include credentials.
 ### Configuration
 
 Settings resolve with precedence: explicit CLI flag > project `archapi.toml`
-> environment variable > built-in default. Optional project-local
+> environment variable > built-in default (full detail:
+[`docs/CONFIGURATION.md`](docs/CONFIGURATION.md)). Optional project-local
 `archapi.toml`:
 
 ```toml
@@ -185,7 +182,7 @@ engine = ArchAPI(
 )
 
 result = engine.generate_api(
-    "Create authenticated POST API for user refund request",
+    "Create authenticated POST API for warranty claim",
     dry_run=True,
 )
 
@@ -195,6 +192,27 @@ print(result.validation_report)
 
 Deterministic generation (`use_llm=False`, the default) does not require the
 `openai` package and works fully offline.
+
+### How architecture-aware retrieval works
+
+On the LLM path, ArchAPI doesn't send the model arbitrary or first-found
+repository files. It indexes the project, scores every candidate file
+against the specific request (resource, HTTP method, whether auth/validation
+was asked for), and sends a budgeted set of the highest-relevance examples —
+a route or two, a service, a schema, an auth example only if authentication
+was requested, a test — labeled so the model knows what each one
+demonstrates. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the
+full pipeline and [`docs/RESEARCH_REPORT.md`](docs/RESEARCH_REPORT.md) for
+the evidence this actually changes what gets generated.
+
+### Safety mechanisms
+
+Dry-run by default, atomic multi-file application with automatic rollback
+on partial failure, path-traversal/absolute-path rejection, project-root
+containment, protected-file/bootstrap-file controls, generated-secret
+detection, framework validation, and context redaction before any content
+leaves the machine. No `--skip-safety`-style bypass exists. Full detail:
+[`docs/SECURITY_MEASURES.md`](docs/SECURITY_MEASURES.md).
 
 ## Express TypeScript Example
 
@@ -311,10 +329,14 @@ Generated path: /products/{product_id}/reviews
 
 - [How to Run](docs/HOW_TO_RUN.md)
 - [Architecture](docs/ARCHITECTURE.md)
-- [File Guide](docs/FILE_GUIDE.md)
-- [Security Measures](docs/SECURITY_MEASURES.md)
+- [Configuration](docs/CONFIGURATION.md)
+- [CLI Reference](docs/CLI.md)
 - [LLM Usage Guide](docs/LLM_USAGE.md)
+- [Security Measures](docs/SECURITY_MEASURES.md)
+- [Evaluation Harness](docs/EVALUATION.md)
+- [Research Report](docs/RESEARCH_REPORT.md)
 - [Development Status](docs/DEVELOPMENT_STATUS.md)
+- [File Guide](docs/FILE_GUIDE.md)
 
 ## Contributors
 

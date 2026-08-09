@@ -21,14 +21,23 @@ Current dedicated framework support:
 
 - Express TypeScript
 - FastAPI
+- Flask
+- Django REST Framework
+- NestJS
+
+Anything else falls back to a generic, lower-confidence adapter.
 
 ArchAPI is useful when you want to generate new API layers that follow an existing backend structure.
 
-For Express TypeScript, ArchAPI can generate route, controller, service, schema, and test files.
+Two generation modes share the same detection/scanning/validation machinery:
 
-For FastAPI, ArchAPI can generate router, service, schema, and test files.
+- **Deterministic** (default) — rule-based templates, works fully offline.
+- **LLM-assisted** (`--llm`) — an LLM writes the code, guided by an
+  architecture-aware retrieval pipeline that selects the repository
+  examples most relevant to your request (see
+  [LLM Usage Guide](LLM_USAGE.md)).
 
-ArchAPI supports dry-run generation, which means users can inspect generated files before writing anything to disk.
+ArchAPI supports dry-run generation, which means users can inspect generated files before writing anything to disk. Nothing is ever written unless you pass `--apply` (CLI) or `dry_run=False` (Python API).
 
 ---
 
@@ -95,27 +104,43 @@ GitHub source install worked
 ## 5. Run All Tests
 
 ```bash
-python -m compileall archapi
-python -m unittest tests.test_archapi_suite -v
+python -m compileall archapi evaluation
+python -m unittest discover -s tests -v
 ```
 
 Expected output:
 
 ```text
-Ran 7 tests
+Ran 231 tests
 
 OK
 ```
 
-Or use:
-
-```bash
-./scripts/run_tests.sh
-```
+(The exact count grows over time; treat "OK" with zero failures as the pass condition, not the literal number.) No `OPENAI_API_KEY` is required — the full suite never makes a real network call.
 
 ---
 
-## 6. Basic Usage
+## 6. Command-Line Interface
+
+```bash
+archapi scan ./my_backend_project
+archapi plan ./my_backend_project "Create authenticated POST API for warranty claim"
+
+# Deterministic, dry-run by default
+archapi generate ./my_backend_project "Create authenticated POST API for warranty claim"
+
+# LLM-assisted (architecture-aware retrieval), dry-run by default
+archapi generate ./my_backend_project "Create authenticated POST API for warranty claim" --llm
+
+# Explicit filesystem mutation -- always opt-in
+archapi generate ./my_backend_project "Create authenticated POST API for warranty claim" --llm --apply
+```
+
+Full reference, including `--json`, `--model`, `--debug`, and exit codes: [CLI Reference](CLI.md). Configuration via `archapi.toml`/environment variables: [Configuration](CONFIGURATION.md).
+
+---
+
+## 7. Basic Usage (Python API)
 
 ```python
 from archapi import ArchAPI
@@ -134,7 +159,7 @@ print(result.diff)
 
 ---
 
-## 7. Dry Run vs Writing Files
+## 8. Dry Run vs Writing Files
 
 Dry run generates files in memory only:
 
@@ -158,7 +183,7 @@ ArchAPI raises `FileExistsError` if a generated file already exists.
 
 ---
 
-## 8. Express TypeScript Example
+## 9. Express TypeScript Example
 
 ```python
 from pathlib import Path
@@ -217,7 +242,7 @@ Generated path: /users/{user_id}/orders
 
 ---
 
-## 9. FastAPI Example
+## 10. FastAPI Example
 
 ```python
 from pathlib import Path
@@ -273,7 +298,7 @@ Generated path: /products/{product_id}/reviews
 
 ---
 
-## 10. Strict Config Mode
+## 11. Strict Config Mode
 
 Use strict config mode when the project has a custom folder structure or the repository contains multiple projects.
 
@@ -302,21 +327,26 @@ print(result.diff)
 
 ---
 
-## 11. Security Features
+## 12. Security Features
 
 ArchAPI includes:
 
-- dry-run generation by default
-- overwrite protection
+- dry-run generation by default, with an explicit `--apply`/`dry_run=False` required to write anything
+- atomic multi-file application with automatic rollback on partial failure
+- overwrite protection (refuses to clobber an existing file for a "create"-action write)
 - low-confidence blocking
 - strict config mode
-- generated-path policy checks
-- context redaction
+- PolicyGate: absolute-path/traversal rejection, project-root containment, protected files/directories, bootstrap/config-file controls, generated-secret detection
+- framework validation
+- context redaction before any LLM call
 - secret scanning helpers
+- CI secret scanning
+
+Full detail: [Security Measures](SECURITY_MEASURES.md).
 
 ---
 
-## 12. Common Issues
+## 13. Common Issues
 
 ### `pip: command not found`
 
@@ -351,7 +381,7 @@ cd archapi-github-test
 
 ---
 
-## 13. Links
+## 14. Links
 
 GitHub:
 
