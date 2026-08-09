@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 from archapi.frameworks.base import FrameworkAdapter
+from archapi.mapping.layer_classifier import LayerClassifier
 from archapi.planning.intent_planner import IntentPlanner
 from archapi.types import (
     APIPlan,
@@ -34,40 +35,37 @@ IGNORED_DIRS = {
 class GenericAdapter(FrameworkAdapter):
     name = "generic"
 
+    _classifier = LayerClassifier()
+
+    _LAYER_TO_BUCKET = {
+        "route": "routes",
+        "controller": "controllers",
+        "service": "services",
+        "model": "models",
+        "schema": "schemas",
+        "middleware": "middleware",
+        "test": "tests",
+        "config": "config_files",
+    }
+
     def detect(self, project_path: Path) -> DetectionResult:
         return DetectionResult("generic", 0.10, ["Fallback generic adapter"])
 
     def scan(self, project_path: Path) -> ScanResult:
+        project_path = Path(project_path)
         result = ScanResult(framework=self.name, project_path=project_path)
 
         for path in self._walk_files(project_path):
-            lower = str(path).lower()
+            try:
+                relative = path.relative_to(project_path)
+            except ValueError:
+                relative = Path(path.name)
 
-            if "route" in lower or "url" in lower:
-                result.routes.append(path)
-            elif "controller" in lower or "handler" in lower or "view" in lower:
-                result.controllers.append(path)
-            elif "service" in lower:
-                result.services.append(path)
-            elif "model" in lower or "entity" in lower:
-                result.models.append(path)
-            elif "schema" in lower or "serializer" in lower or "dto" in lower:
-                result.schemas.append(path)
-            elif "middleware" in lower or "permission" in lower or "auth" in lower:
-                result.middleware.append(path)
-            elif "test" in lower or "spec" in lower:
-                result.tests.append(path)
-            elif path.name in {
-                "package.json",
-                "pyproject.toml",
-                "requirements.txt",
-                "pom.xml",
-                "build.gradle",
-                "go.mod",
-                "composer.json",
-                "Gemfile",
-            }:
-                result.config_files.append(path)
+            classification = self._classifier.classify(relative, framework=self.name)
+            bucket_name = self._LAYER_TO_BUCKET.get(classification.layer)
+
+            if bucket_name is not None:
+                getattr(result, bucket_name).append(path)
             else:
                 result.unknown.append(path)
 
