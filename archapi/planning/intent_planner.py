@@ -105,19 +105,67 @@ class IntentPlanner:
         if detected:
             return detected[:2]
 
+        return self._infer_entities_generic(text)
+
+    # Words that describe the request itself (HTTP verb, auth/validation
+    # qualifiers, generic request/response nouns) rather than the resource
+    # being acted on. Kept separate from ENTITY_RULES because this list
+    # generalizes to any unlisted resource noun (invoice, shipment,
+    # subscription, ticket, comment, ...) instead of requiring every new
+    # entity to be hardcoded.
+    _GENERIC_STOPWORDS = {
+        "create", "creating", "creation", "get", "fetch", "fetching",
+        "update", "updating", "delete", "deleting", "remove", "removing",
+        "api", "for", "a", "an", "the", "to", "by", "of", "with", "and",
+        "or", "via", "using", "history", "status", "new", "existing",
+        "details", "detail", "request", "requests", "endpoint",
+        "endpoints", "resource", "resources", "submission", "submitting",
+        "submit", "authenticated", "unauthenticated", "authorized",
+        "unauthorized", "authorization", "authentication", "secure",
+        "secured", "public", "private", "validated", "validation",
+        "valid", "invalid", "required", "optional",
+    }
+
+    def _infer_entities_generic(self, text: str) -> List[str]:
+        """
+        Fallback resource extraction for nouns not present in ENTITY_RULES.
+
+        Picking the first two leftover content words in sentence order (the
+        previous approach) breaks as soon as a qualifier word precedes the
+        actual resource -- e.g. "authenticated POST API for refund request"
+        would surface "Authenticated"/"Post" instead of "Refund". Natural
+        API-request phrasing overwhelmingly follows "... API for <resource>
+        ...", so the word immediately after the last "for" is the strongest
+        positional signal and is preferred when present.
+        """
         words = re.findall(r"[A-Za-z]+", text)
-        stop = {
-            "create", "get", "fetch", "update", "delete", "api", "for",
-            "a", "an", "the", "to", "by", "of", "history", "status",
-            "new", "existing", "details", "detail"
-        }
+        lowered = [word.lower() for word in words]
+        method_words = set(self.EXPLICIT_METHODS.keys())
 
-        fallback = []
-        for word in words:
-            if word.lower() not in stop and len(word) > 2:
-                fallback.append(word.capitalize())
+        content_indices = [
+            i for i, word in enumerate(lowered)
+            if word not in method_words
+            and word not in self._GENERIC_STOPWORDS
+            and len(word) > 2
+        ]
 
-        return fallback[:2] or ["Resource"]
+        if not content_indices:
+            return ["Resource"]
+
+        for_index = None
+        for i, word in enumerate(lowered):
+            if word == "for":
+                for_index = i
+
+        if for_index is not None:
+            after_for = [i for i in content_indices if i > for_index]
+            if after_for:
+                primary = after_for[0]
+                before_for = [i for i in content_indices if i < for_index]
+                ordered = ([before_for[-1]] if before_for else []) + [primary]
+                return [words[i].capitalize() for i in ordered][:2]
+
+        return [words[i].capitalize() for i in content_indices[:2]]
 
     def _infer_action(self, text: str, method: str) -> str:
         if "history" in text:
